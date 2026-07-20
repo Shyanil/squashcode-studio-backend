@@ -17,15 +17,18 @@ npm run dev
 - `npm run build` compiles TypeScript into `dist/`.
 - `npm run start` runs the compiled API from `dist/index.js`.
 
-## Railway
+## Render
 
-This repository includes `railway.json` so Railway builds with Railpack and runs:
+This repository includes `render.yaml` so Render creates a Node web service with:
 
-- Build command: `npm run build`
+- Build command: `npm ci && npm run build`
 - Start command: `npm run start`
 - Healthcheck path: `/health`
 
-Set the required environment variables in Railway before deploying:
+The API binds to `0.0.0.0` and reads the port from `PORT`. Render provides `PORT`
+automatically and defaults it to `10000` for web services.
+
+Set the required environment variables in Render before deploying:
 
 - `OPENAI_API_KEY`
 - `SUPABASE_URL`
@@ -37,4 +40,4 @@ Optional environment variables:
 - `CORS_ORIGIN` accepts comma-separated deployed frontend origins.
 - `CPANEL_UPLOAD_DELETE_URL` defaults to `https://squashcode-studio.7sc.in/upload_delete.php`.
 - `CPANEL_SUPPORTING_UPLOAD_URL` defaults to `https://squashcode-studio.7sc.in/upload_supporting.php`.
-- `PORT` is provided by Railway automatically and defaults to `4000` locally.
+- `PORT` is provided by Render automatically and defaults to `4000` locally.
