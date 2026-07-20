@@ -38,6 +38,6 @@ Optional environment variables:
 
 - `OPENAI_MODEL` defaults to `gpt-5`.
 - `CORS_ORIGIN` accepts comma-separated deployed frontend origins.
-- `CPANEL_UPLOAD_DELETE_URL` defaults to `https://squashcode-studio.7sc.in/upload_delete.php`.
-- `CPANEL_SUPPORTING_UPLOAD_URL` defaults to `https://squashcode-studio.7sc.in/upload_supporting.php`.
+- `CPANEL_UPLOAD_DELETE_URL` defaults to `https://api.squashcode-studio.7sc.in/upload_delete.php`.
+- `CPANEL_SUPPORTING_UPLOAD_URL` defaults to `https://api.squashcode-studio.7sc.in/upload_supporting.php`.
 - `PORT` is provided by Render automatically and defaults to `4000` locally.
