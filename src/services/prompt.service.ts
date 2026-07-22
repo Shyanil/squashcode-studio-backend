@@ -165,6 +165,8 @@ function referenceImageForJson(asset?: PromptAsset): JsonObject | undefined {
   return {
     link: url,
     url,
+    referenceImageUrl: url,
+    reference_image_url: url,
     bucketName: asset.bucketName,
     storagePath: asset.storagePath,
     fileName: asset.fileName,
@@ -179,6 +181,37 @@ function referenceImageForJson(asset?: PromptAsset): JsonObject | undefined {
 
 function referenceImagesForJson(assets: PromptAsset[]): JsonObject[] {
   return assets.map(referenceImageForJson).filter((image): image is JsonObject => Boolean(image));
+}
+
+function applyReferenceImagesToJson(generatedJson: JsonObject, referenceImages: JsonObject[]) {
+  const referenceImage = referenceImages[0];
+
+  if (!referenceImage) {
+    const next = { ...generatedJson };
+    delete next.referenceImage;
+    delete next.referenceImages;
+    delete next.referenceImageUrl;
+    delete next.referenceImageLink;
+    delete next.reference_image_url;
+    delete next.reference_image_link;
+    delete next.reference_images;
+    return next;
+  }
+
+  return {
+    ...generatedJson,
+    referenceImage,
+    referenceImages,
+    referenceImageLink: referenceImage.link,
+    referenceImageUrl: referenceImage.url,
+    reference_image_link: referenceImage.link,
+    reference_image_url: referenceImage.url,
+    reference_images: referenceImages,
+  };
+}
+
+function withReferenceImages(generatedJson: JsonObject, referenceAssets: PromptAsset[]): JsonObject {
+  return applyReferenceImagesToJson(generatedJson, referenceImagesForJson(referenceAssets));
 }
 
 function referenceImageUrlFromRecord(value: unknown) {
@@ -209,6 +242,59 @@ function referenceImageUrlFromList(value: unknown) {
   }
 
   return undefined;
+}
+
+function normalizedReferenceImageRecord(value: unknown): JsonObject | undefined {
+  const record = asJsonObject(value);
+  const url = referenceImageUrlFromRecord(record);
+
+  if (!url && !Object.keys(record).length) {
+    return undefined;
+  }
+
+  return {
+    ...record,
+    link: url ?? record.link ?? null,
+    url: url ?? record.url ?? null,
+    referenceImageUrl: url ?? record.referenceImageUrl ?? null,
+    reference_image_url: url ?? record.reference_image_url ?? null,
+  };
+}
+
+function normalizedReferenceImageList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map(normalizedReferenceImageRecord)
+    .filter((image): image is JsonObject => Boolean(image));
+}
+
+function generationReferenceImages(generatedJson: JsonObject, promptMetadata: JsonObject) {
+  const images = [
+    normalizedReferenceImageRecord(promptMetadata.referenceImage),
+    normalizedReferenceImageRecord(generatedJson.referenceImage),
+    ...normalizedReferenceImageList(promptMetadata.referenceImages),
+    ...normalizedReferenceImageList(generatedJson.referenceImages),
+    ...normalizedReferenceImageList(generatedJson.reference_images),
+  ].filter((image): image is JsonObject => Boolean(image));
+  const seen = new Set<string>();
+
+  return images.filter((image) => {
+    const key =
+      asNullableString(image.url) ??
+      asNullableString(image.link) ??
+      asNullableString(image.storagePath) ??
+      JSON.stringify(image);
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 function generationReferenceImageUrl(
@@ -309,21 +395,18 @@ function inferContextFromGeneratedJson(generatedJson: JsonObject, promptMetadata
 function generatedJsonForClient(
   generatedJson: JsonObject,
   creativeContext: CreativeContext,
+  promptMetadata: JsonObject,
 ): JsonObject {
   const next: JsonObject = { ...generatedJson };
   const campaign = asJsonObject(next.campaign);
   const copy = asJsonObject(next.copy);
+  const layout = asJsonObject(next.layout);
+  const imageQuality = asJsonObject(next.imageQuality);
   const visualDirection = asJsonObject(next.visualDirection);
   const productionNotes = asJsonObject(next.productionNotes);
   const summarizedRequests = arrayStrings(copy.userRequestedChanges).flatMap(summarizedBriefLines);
 
-  delete next.referenceImage;
-  delete next.referenceImages;
-  delete next.referenceImageUrl;
-  delete next.referenceImageLink;
-  delete next.reference_image_url;
-  delete next.reference_image_link;
-  delete next.reference_images;
+  const referenceImages = generationReferenceImages(generatedJson, promptMetadata);
 
   if (
     creativeContext.subject &&
@@ -363,6 +446,13 @@ function generatedJsonForClient(
     next.visualDirection = visualDirection;
   }
 
+  layout.aspectRatio = 'Set in Creative Generator';
+  next.layout = layout;
+
+  imageQuality.quality = 'Set in Creative Generator';
+  imageQuality.imageCount = 'Set in Creative Generator';
+  next.imageQuality = imageQuality;
+
   if (summarizedRequests.length) {
     copy.userRequestedChanges = [...new Set(summarizedRequests)].slice(-8);
     next.copy = copy;
@@ -371,7 +461,7 @@ function generatedJsonForClient(
   delete productionNotes.memoryUsed;
   next.productionNotes = productionNotes;
 
-  return next;
+  return applyReferenceImagesToJson(next, referenceImages);
 }
 
 function asMemoryItems(value: unknown): PromptMemoryItem[] {
@@ -485,7 +575,7 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
     asCreativeContext(row.creative_context_snapshot),
     inferContextFromGeneratedJson(generatedJson, promptMetadata),
   );
-  const clientGeneratedJson = generatedJsonForClient(generatedJson, creativeContext);
+  const clientGeneratedJson = generatedJsonForClient(generatedJson, creativeContext, promptMetadata);
   const referenceImageUrl = generationReferenceImageUrl(row, generatedJson, promptMetadata);
   const displayTitle = displayNameFromPromptContext({
     generatedJson: clientGeneratedJson,
@@ -1591,15 +1681,16 @@ export class PromptService {
     const referenceImages = referenceImagesForJson(input.referenceAssets);
     const referenceImage = referenceImages[0];
     const primaryAsset = input.referenceAssets[0];
+    const generatedJsonWithReferences = withReferenceImages(input.generatedJson, input.referenceAssets);
     const displayTitle = displayNameFromPromptContext({
       sessionTitle: input.session.title,
-      generatedJson: input.generatedJson,
+      generatedJson: generatedJsonWithReferences,
       promptMetadata: input.promptMetadata,
       creativeContext: input.session.creativeContext,
       imageAnalysis: input.session.imageAnalysis,
     });
     const generatedJson: JsonObject = {
-      ...input.generatedJson,
+      ...generatedJsonWithReferences,
       title: displayTitle,
     };
     const promptMetadata: JsonObject = {

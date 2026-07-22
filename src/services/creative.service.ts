@@ -376,6 +376,9 @@ function buildGenerationPrompt(input: {
     input.promptGeneration
       ? 'Use the selected JSON prompt as the source of truth for strategy, copy, layout, visual direction, and production notes.'
       : undefined,
+    input.promptGeneration
+      ? 'Use the Creative Generator settings below for aspect ratio, render size, quality, and image count. Ignore any conflicting aspectRatio, quality, or imageCount values inside the selected JSON.'
+      : undefined,
     selectedJson ? `Selected JSON prompt:\n${selectedJson}` : undefined,
     input.referenceImageUrl
       ? 'Use the attached reference image for composition, subject continuity, visual hierarchy, palette, styling, and brand feel. Do not create an unrelated concept.'

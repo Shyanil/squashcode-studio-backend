@@ -128,6 +128,7 @@ function sanitizeGeneratedJson(
   const typography = isRecord(next.typography) ? { ...next.typography } : {};
   const colorSystem = isRecord(next.colorSystem) ? { ...next.colorSystem } : {};
   const layout = isRecord(next.layout) ? { ...next.layout } : {};
+  const imageQuality = isRecord(next.imageQuality) ? { ...next.imageQuality } : {};
   const visualDirection = isRecord(next.visualDirection) ? { ...next.visualDirection } : {};
   const productionNotes = isRecord(next.productionNotes) ? { ...next.productionNotes } : {};
 
@@ -224,9 +225,7 @@ function sanitizeGeneratedJson(
     layout.platform = context.platform;
   }
 
-  if (context.aspectRatio) {
-    layout.aspectRatio = context.aspectRatio;
-  }
+  layout.aspectRatio = 'Set in Creative Generator';
 
   if (context.whiteSpace) {
     layout.whiteSpace = context.whiteSpace;
@@ -239,6 +238,10 @@ function sanitizeGeneratedJson(
   if (Object.keys(layout).length) {
     next.layout = layout;
   }
+
+  imageQuality.quality = 'Set in Creative Generator';
+  imageQuality.imageCount = 'Set in Creative Generator';
+  next.imageQuality = imageQuality;
 
   if (userRequestedChanges.length) {
     copy.userRequestedChanges = userRequestedChanges;
@@ -327,13 +330,13 @@ function fallbackGeneratedJson(
       },
       layout: {
         platform: context.platform ?? 'Instagram',
-        aspectRatio,
+        aspectRatio: 'Set in Creative Generator',
         whiteSpace: context.whiteSpace ?? 'Leave breathing room around primary copy and subject',
         logoPlacement: context.logoPlacement ?? 'Small logo placement away from the main focal point',
       },
       imageQuality: {
-        quality,
-        imageCount,
+        quality: 'Set in Creative Generator',
+        imageCount: 'Set in Creative Generator',
         notes: context.imageQuality ?? 'High-resolution, clean, no artifacts or distorted text',
       },
       negativePrompt: [
@@ -425,7 +428,8 @@ export class JsonGenerationService {
           'Use app-supplied memory only when it clearly matches the same project, brand, or industry. Never let unrelated previous sessions change the industry, title, campaign type, or audience.',
           'Do not copy raw conversation, pasted website pages, navigation text, URLs, backend URLs, frontend URLs, or asset URLs into generatedJson.',
           'For copy.userRequestedChanges, include only 3-8 short summarized requirements. If the user pasted a long website page, extract only the important details and constraints.',
-          'Reference images are passed by the app outside the visible JSON. In generatedJson, refer to the uploaded primary style reference image in words only, without a URL.',
+          'Do not invent image URLs. The app will attach the real uploaded reference and supporting image URLs to generatedJson after generation.',
+          'Do not hardcode aspectRatio, quality, or imageCount inside generatedJson. These are selected later in Creative Generator controls.',
           'The output JSON must be reusable by an image-generation workflow and include strategy, visual direction, copy, layout, negative prompt, and production notes.',
           `Session: ${JSON.stringify(input.session)}`,
           `Conversation: ${JSON.stringify(conversation)}`,
