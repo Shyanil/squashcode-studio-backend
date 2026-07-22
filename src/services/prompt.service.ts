@@ -24,6 +24,10 @@ import type {
   PromptUploadedImage,
 } from '@/models/prompt.model';
 import { supabaseClient } from '@/supabase/client';
+import {
+  getSupabaseRequestAccessToken,
+  runWithSupabaseAccessToken,
+} from '@/supabase/requestContext';
 import { HttpError } from '@/utils/httpError';
 import {
   displayNameForPromptSession,
@@ -576,6 +580,7 @@ export class PromptService {
     analysis: ImageAnalysis;
     assistantMessage: PromptMessage;
   } | null> {
+    const requestAccessToken = getSupabaseRequestAccessToken();
     const userId = resolveUserId(input.userId);
     const session = await this.getSession(input.sessionId, userId);
 
@@ -593,51 +598,53 @@ export class PromptService {
       brandContext: session.brandContext,
       memoryContext: session.memoryContext,
     });
-    const analysisContext = imageAnalysisToContext(analysis);
-    const creativeContext = mergeCreativeContext(session.creativeContext, analysisContext);
-    const refreshedMemory = await this.findRelevantMemory(
-      userId,
-      creativeContext,
-      session.brandContext,
-    );
-    const nextSession = await this.updateSession(session.id, userId, {
-      sourceType: session.sourceType === 'text' ? 'mixed' : 'image',
-      status: 'active',
-      title: displayNameForPromptSession({
-        requestedTitle: session.title,
+    return runWithSupabaseAccessToken(requestAccessToken, async () => {
+      const analysisContext = imageAnalysisToContext(analysis);
+      const creativeContext = mergeCreativeContext(session.creativeContext, analysisContext);
+      const refreshedMemory = await this.findRelevantMemory(
+        userId,
+        creativeContext,
+        session.brandContext,
+      );
+      const nextSession = await this.updateSession(session.id, userId, {
+        sourceType: session.sourceType === 'text' ? 'mixed' : 'image',
+        status: 'active',
+        title: displayNameForPromptSession({
+          requestedTitle: session.title,
+          creativeContext,
+          imageAnalysis: analysis,
+        }),
         creativeContext,
         imageAnalysis: analysis,
-      }),
-      creativeContext,
-      imageAnalysis: analysis,
-      memoryContext: refreshedMemory,
-      metadata: {
-        ...session.metadata,
-        latestAssetId: asset.id,
-        latestImageFileName: asset.fileName,
-      },
-    });
-    const assistantMessage = await this.addMessage({
-      sessionId: session.id,
-      userId,
-      role: 'assistant',
-      content: createAnalysisMessage(analysis),
-      contentJson: {
-        type: 'image_analysis',
-        imageAnalysis: analysis,
-        creativeContext,
-      },
-      metadata: {
-        assetId: asset.id,
-      },
-    });
+        memoryContext: refreshedMemory,
+        metadata: {
+          ...session.metadata,
+          latestAssetId: asset.id,
+          latestImageFileName: asset.fileName,
+        },
+      });
+      const assistantMessage = await this.addMessage({
+        sessionId: session.id,
+        userId,
+        role: 'assistant',
+        content: createAnalysisMessage(analysis),
+        contentJson: {
+          type: 'image_analysis',
+          imageAnalysis: analysis,
+          creativeContext,
+        },
+        metadata: {
+          assetId: asset.id,
+        },
+      });
 
-    return {
-      session: nextSession,
-      asset,
-      analysis,
-      assistantMessage,
-    };
+      return {
+        session: nextSession,
+        asset,
+        analysis,
+        assistantMessage,
+      };
+    });
   }
 
   async sendMessage(input: SendMessageInput): Promise<{
@@ -645,6 +652,7 @@ export class PromptService {
     userMessage: PromptMessage;
     assistantMessage: PromptMessage;
   } | null> {
+    const requestAccessToken = getSupabaseRequestAccessToken();
     const userId = resolveUserId(input.userId);
     const session = await this.getSession(input.sessionId, userId);
 
@@ -674,52 +682,55 @@ export class PromptService {
       messages,
       latestGeneratedJson: latestGeneration?.generatedJson,
     });
-    const refreshedMemory = await this.findRelevantMemory(
-      userId,
-      assistantResult.updatedContext,
-      session.brandContext,
-    );
-    const nextSession = await this.updateSession(session.id, userId, {
-      status: 'active',
-      sourceType:
-        session.sourceType === 'image'
-          ? 'mixed'
-          : session.sourceType === 'mixed'
+    return runWithSupabaseAccessToken(requestAccessToken, async () => {
+      const refreshedMemory = await this.findRelevantMemory(
+        userId,
+        assistantResult.updatedContext,
+        session.brandContext,
+      );
+      const nextSession = await this.updateSession(session.id, userId, {
+        status: 'active',
+        sourceType:
+          session.sourceType === 'image'
             ? 'mixed'
-            : 'text',
-      creativeContext: assistantResult.updatedContext,
-      memoryContext: refreshedMemory,
-      metadata: {
-        ...session.metadata,
-        lastAssistantModel: assistantResult.modelName,
-      },
-    });
-    const assistantMessage = await this.addMessage({
-      sessionId: session.id,
-      userId,
-      role: 'assistant',
-      content: assistantResult.assistantMessage,
-      contentJson: {
-        creativeContextPatch: assistantResult.contextPatch,
+            : session.sourceType === 'mixed'
+              ? 'mixed'
+              : 'text',
         creativeContext: assistantResult.updatedContext,
-        unresolvedQuestions: assistantResult.unresolvedQuestions,
-      },
-      metadata: {
-        modelName: assistantResult.modelName,
-      },
-    });
+        memoryContext: refreshedMemory,
+        metadata: {
+          ...session.metadata,
+          lastAssistantModel: assistantResult.modelName,
+        },
+      });
+      const assistantMessage = await this.addMessage({
+        sessionId: session.id,
+        userId,
+        role: 'assistant',
+        content: assistantResult.assistantMessage,
+        contentJson: {
+          creativeContextPatch: assistantResult.contextPatch,
+          creativeContext: assistantResult.updatedContext,
+          unresolvedQuestions: assistantResult.unresolvedQuestions,
+        },
+        metadata: {
+          modelName: assistantResult.modelName,
+        },
+      });
 
-    return {
-      session: nextSession,
-      userMessage,
-      assistantMessage,
-    };
+      return {
+        session: nextSession,
+        userMessage,
+        assistantMessage,
+      };
+    });
   }
 
   async addSessionAsset(input: AddSessionAssetInput): Promise<{
     session: PromptSession;
     asset: PromptAsset;
   } | null> {
+    const requestAccessToken = getSupabaseRequestAccessToken();
     const userId = resolveUserId(input.userId);
     const session = await this.getSession(input.sessionId, userId);
 
@@ -732,30 +743,33 @@ export class PromptService {
       assetRole,
       source: 'prompt_generator_supporting_asset',
     });
-    const nextSession = await this.updateSession(session.id, userId, {
-      sourceType: session.sourceType === 'text' ? 'mixed' : session.sourceType,
-      status: 'active',
-      metadata: {
-        ...session.metadata,
-        supportingAssetIds: [
-          ...(Array.isArray(session.metadata.supportingAssetIds)
-            ? session.metadata.supportingAssetIds
-            : []),
-          asset.id,
-        ],
-      },
-    });
+    return runWithSupabaseAccessToken(requestAccessToken, async () => {
+      const nextSession = await this.updateSession(session.id, userId, {
+        sourceType: session.sourceType === 'text' ? 'mixed' : session.sourceType,
+        status: 'active',
+        metadata: {
+          ...session.metadata,
+          supportingAssetIds: [
+            ...(Array.isArray(session.metadata.supportingAssetIds)
+              ? session.metadata.supportingAssetIds
+              : []),
+            asset.id,
+          ],
+        },
+      });
 
-    return {
-      session: nextSession,
-      asset,
-    };
+      return {
+        session: nextSession,
+        asset,
+      };
+    });
   }
 
   async generateSessionJson(input: GenerateSessionJsonInput): Promise<{
     session: PromptSession;
     generation: PromptGeneration;
   } | null> {
+    const requestAccessToken = getSupabaseRequestAccessToken();
     const userId = resolveUserId(input.userId);
     const session = await this.getSession(input.sessionId, userId);
 
@@ -781,48 +795,50 @@ export class PromptService {
       messages,
       outputOptions: input.outputOptions,
     });
-    const generation = await this.saveGeneration({
-      session,
-      generatedJson: generated.generatedJson,
-      promptText: generated.promptText,
-      promptMetadata: {
-        ...generated.promptMetadata,
-        creativeContextSnapshot: session.creativeContext,
-        conversationSnapshot: messages.map((message) => ({
-          role: message.role,
-          content: message.content,
-          createdAt: message.createdAt,
-        })),
-      },
-      modelName: generated.modelName,
-      aspectRatio: generated.aspectRatio,
-      quality: generated.quality,
-      imageCount: generated.imageCount,
-      referenceAssets,
-    });
-    const generationTitle = displayNameForPromptSession({
-      requestedTitle: session.title,
-      generatedJson: generation.generatedJson,
-      promptMetadata: generation.promptMetadata,
-      creativeContext: session.creativeContext,
-      imageAnalysis: session.imageAnalysis,
-    });
-    const nextSession = await this.updateSession(session.id, userId, {
-      status: 'generated',
-      title: generationTitle,
-      lastGeneratedAt: generation.createdAt,
-      metadata: {
-        ...session.metadata,
-        displayTitle: generationTitle,
-        latestGenerationId: generation.id,
-        latestGenerationVersion: generation.versionNumber,
-      },
-    });
+    return runWithSupabaseAccessToken(requestAccessToken, async () => {
+      const generation = await this.saveGeneration({
+        session,
+        generatedJson: generated.generatedJson,
+        promptText: generated.promptText,
+        promptMetadata: {
+          ...generated.promptMetadata,
+          creativeContextSnapshot: session.creativeContext,
+          conversationSnapshot: messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            createdAt: message.createdAt,
+          })),
+        },
+        modelName: generated.modelName,
+        aspectRatio: generated.aspectRatio,
+        quality: generated.quality,
+        imageCount: generated.imageCount,
+        referenceAssets,
+      });
+      const generationTitle = displayNameForPromptSession({
+        requestedTitle: session.title,
+        generatedJson: generation.generatedJson,
+        promptMetadata: generation.promptMetadata,
+        creativeContext: session.creativeContext,
+        imageAnalysis: session.imageAnalysis,
+      });
+      const nextSession = await this.updateSession(session.id, userId, {
+        status: 'generated',
+        title: generationTitle,
+        lastGeneratedAt: generation.createdAt,
+        metadata: {
+          ...session.metadata,
+          displayTitle: generationTitle,
+          latestGenerationId: generation.id,
+          latestGenerationVersion: generation.versionNumber,
+        },
+      });
 
-    return {
-      session: nextSession,
-      generation,
-    };
+      return {
+        session: nextSession,
+        generation,
+      };
+    });
   }
 
   async generateOneOffJson(input: {
@@ -1066,6 +1082,7 @@ export class PromptService {
     image: PromptUploadedImage,
     options: { assetRole?: string; source?: string } = {},
   ): Promise<PromptAsset> {
+    const requestAccessToken = getSupabaseRequestAccessToken();
     const createdAt = nowIso();
     const safeFileName = sanitizeFileName(image.fileName);
     const storagePath = `${session.userId}/${session.id}/${Date.now()}-${safeFileName}`;
@@ -1145,6 +1162,7 @@ export class PromptService {
     };
 
     if (shouldUseRemote(session.userId) && supabaseClient) {
+      const client = supabaseClient;
       const legacyRow = {
         id: asset.id,
         session_id: session.id,
@@ -1157,46 +1175,50 @@ export class PromptService {
         reference_image_url: referenceImageUrl,
         metadata: asset.metadata,
       };
-      const { data, error } = await supabaseClient
-        .from('prompt_assets')
-        .insert({
-          ...legacyRow,
-          cpanel_type: 'reference',
-          cpanel_subfolder: asset.cpanelSubfolder,
-          cpanel_filename: asset.cpanelFilename,
-        })
-        .select()
-        .single();
+      return runWithSupabaseAccessToken(requestAccessToken, async () => {
+        const { data, error } = await client
+          .from('prompt_assets')
+          .insert({
+            ...legacyRow,
+            cpanel_type: 'reference',
+            cpanel_subfolder: asset.cpanelSubfolder,
+            cpanel_filename: asset.cpanelFilename,
+          })
+          .select()
+          .single();
 
-      if (error) {
-        if (isMissingPromptAssetCpanelColumn(error)) {
-          const { data: legacyData, error: legacyError } = await supabaseClient
-            .from('prompt_assets')
-            .insert(legacyRow)
-            .select()
-            .single();
+        if (error) {
+          if (isMissingPromptAssetCpanelColumn(error)) {
+            const { data: legacyData, error: legacyError } = await client
+              .from('prompt_assets')
+              .insert(legacyRow)
+              .select()
+              .single();
 
-          if (legacyError) {
-            throwSupabaseError('prompt asset create', legacyError);
+            if (legacyError) {
+              throwSupabaseError('prompt asset create', legacyError);
+            }
+
+            if (legacyData) {
+              return {
+                ...mapAsset(legacyData as SupabaseRow),
+                url: referenceImageUrl,
+              };
+            }
           }
 
-          if (legacyData) {
-            return {
-              ...mapAsset(legacyData as SupabaseRow),
-              url: referenceImageUrl,
-            };
-          }
+          throwSupabaseError('prompt asset create', error);
         }
 
-        throwSupabaseError('prompt asset create', error);
-      }
+        if (data) {
+          return {
+            ...mapAsset(data as SupabaseRow),
+            url: referenceImageUrl,
+          };
+        }
 
-      if (data) {
-        return {
-          ...mapAsset(data as SupabaseRow),
-          url: referenceImageUrl,
-        };
-      }
+        return asset;
+      });
     }
 
     const assets = this.assets.get(session.id) ?? [];

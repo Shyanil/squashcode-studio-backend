@@ -15,12 +15,11 @@ export function runWithSupabaseRequestContext<T>(
   authorizationHeader: string | undefined,
   callback: () => T,
 ) {
-  return requestContext.run(
-    {
-      accessToken: bearerTokenFromHeader(authorizationHeader),
-    },
-    callback,
-  );
+  return runWithSupabaseAccessToken(bearerTokenFromHeader(authorizationHeader), callback);
+}
+
+export function runWithSupabaseAccessToken<T>(accessToken: string | undefined, callback: () => T) {
+  return requestContext.run({ accessToken }, callback);
 }
 
 export function getSupabaseRequestAccessToken() {
