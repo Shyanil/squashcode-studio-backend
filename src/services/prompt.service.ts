@@ -23,7 +23,7 @@ import type {
   PromptSourceType,
   PromptUploadedImage,
 } from '@/models/prompt.model';
-import { supabaseClient } from '@/supabase/client';
+import { supabaseAdminClient, supabaseClient } from '@/supabase/client';
 import {
   getSupabaseRequestAccessToken,
   runWithSupabaseAccessToken,
@@ -1254,13 +1254,19 @@ export class PromptService {
   public async listAllGenerations(input: { userId?: string }): Promise<PromptGeneration[]> {
     const userId = resolveUserId(input.userId);
     const accessibleUserIds = userScopeIds(input.userId);
+    const readClient = supabaseAdminClient ?? supabaseClient;
 
-    if (shouldUseRemote(userId) && supabaseClient) {
-      const { data, error } = await supabaseClient
-        .from('prompt_generations')
-        .select('*')
-        .in('user_id', accessibleUserIds)
-        .order('created_at', { ascending: false });
+    if (shouldUseRemote(userId) && readClient) {
+      const { data, error } = supabaseAdminClient
+        ? await readClient
+            .from('prompt_generations')
+            .select('*')
+            .order('created_at', { ascending: false })
+        : await readClient
+            .from('prompt_generations')
+            .select('*')
+            .in('user_id', accessibleUserIds)
+            .order('created_at', { ascending: false });
 
       if (error) {
         throwSupabaseError('prompt generation list', error);
@@ -1274,9 +1280,7 @@ export class PromptService {
     const allGenerations: PromptGeneration[] = [];
     this.generations.forEach((generations) => {
       generations.forEach((generation) => {
-        if (accessibleUserIds.includes(generation.userId)) {
-          allGenerations.push(generation);
-        }
+        allGenerations.push(generation);
       });
     });
 
@@ -1291,14 +1295,21 @@ export class PromptService {
   ): Promise<PromptGeneration | null> {
     const userId = resolveUserId(userIdInput);
     const accessibleUserIds = userScopeIds(userIdInput);
+    const readClient = supabaseAdminClient ?? supabaseClient;
 
-    if (shouldUseRemote(userId) && supabaseClient) {
-      const { data, error } = await supabaseClient
-        .from('prompt_generations')
-        .select('*')
-        .eq('id', generationId)
-        .in('user_id', accessibleUserIds)
-        .maybeSingle();
+    if (shouldUseRemote(userId) && readClient) {
+      const { data, error } = supabaseAdminClient
+        ? await readClient
+            .from('prompt_generations')
+            .select('*')
+            .eq('id', generationId)
+            .maybeSingle()
+        : await readClient
+            .from('prompt_generations')
+            .select('*')
+            .eq('id', generationId)
+            .in('user_id', accessibleUserIds)
+            .maybeSingle();
 
       if (error) {
         throwSupabaseError('prompt generation fetch', error);
@@ -1308,9 +1319,7 @@ export class PromptService {
     }
 
     for (const generations of this.generations.values()) {
-      const generation = generations.find(
-        (item) => item.id === generationId && accessibleUserIds.includes(item.userId),
-      );
+      const generation = generations.find((item) => item.id === generationId);
 
       if (generation) {
         return generation;

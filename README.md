@@ -38,6 +38,10 @@ Set the required environment variables in Render before deploying:
 set `SUPABASE_ANON_KEY`; authenticated API requests forward the user's bearer token to Supabase so
 RLS policies using `auth.uid()` continue to pass.
 
+The internal Creative Generator uses server-side all-user reads for prompt generations and generated
+creatives, so `SUPABASE_SERVICE_ROLE_KEY` must be set in Render for everyone on the team to see all
+reference images and JSON prompts.
+
 Optional environment variables:
 
 - `OPENAI_MODEL` defaults to `gpt-5`.

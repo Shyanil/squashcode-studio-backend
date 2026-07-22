@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { deflateSync } from 'zlib';
 import axios from 'axios';
 import { env } from '@/config/env';
-import { supabaseClient } from '@/supabase/client';
+import { supabaseAdminClient, supabaseClient } from '@/supabase/client';
 import {
   cpanelAssetService,
   normalizeCpanelAssetUrl,
@@ -846,13 +846,19 @@ export class CreativeService {
 
   async listCreatives(userId?: string): Promise<CreativeModel[]> {
     const accessibleUserIds = userScopeIds(userId);
+    const readClient = supabaseAdminClient ?? supabaseClient;
 
-    if (supabaseClient) {
-      const { data, error } = await supabaseClient
-        .from('creatives')
-        .select('*')
-        .in('user_id', accessibleUserIds)
-        .order('created_at', { ascending: false });
+    if (readClient) {
+      const { data, error } = supabaseAdminClient
+        ? await readClient
+            .from('creatives')
+            .select('*')
+            .order('created_at', { ascending: false })
+        : await readClient
+            .from('creatives')
+            .select('*')
+            .in('user_id', accessibleUserIds)
+            .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Failed to fetch creatives from database:', error);
@@ -875,7 +881,7 @@ export class CreativeService {
         >();
 
         if (generationIds.length) {
-          const { data: generationRows, error: generationError } = await supabaseClient
+          const { data: generationRows, error: generationError } = await readClient
             .from('prompt_generations')
             .select('id, generated_json, prompt_metadata, image_insights')
             .in('id', generationIds);
@@ -903,7 +909,7 @@ export class CreativeService {
       }
     }
 
-    return accessibleUserIds.flatMap((id) => this.creatives.get(id) ?? []);
+    return [...this.creatives.values()].flat();
   }
 
   async deleteCreative(input: { id: string; userId?: string }): Promise<boolean> {
