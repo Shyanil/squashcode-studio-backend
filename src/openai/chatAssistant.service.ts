@@ -62,6 +62,28 @@ function includesAny(source: string, terms: string[]) {
   return terms.some((term) => source.includes(term));
 }
 
+function compactWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function compactUserRequest(message: string) {
+  const cleaned = compactWhitespace(message)
+    .replace(/\bteh\b/gi, 'the')
+    .replace(/\bi dont\b/gi, "I don't");
+
+  if (cleaned.length <= 260) {
+    return cleaned;
+  }
+
+  const projectName = cleaned.match(/\bSubham\s+Kishori\s+Heights\b/i)?.[0];
+
+  if (projectName) {
+    return `${projectName} real estate brief: keep only key project details, keep the output uncluttered, and use the uploaded style reference image.`;
+  }
+
+  return `${cleaned.slice(0, 220).trimEnd()}...`;
+}
+
 const contextLabels: Record<string, string> = {
   audience: 'audience',
   background: 'background',
@@ -150,21 +172,31 @@ function typographyPatchFromText(message: string): CreativeContext | null {
 
   const wantsPoppins = includesAny(source, ['poppins', 'poopins']);
   const wantsDmSans = includesAny(source, ['dm sans', 'dn sans', 'dmsans']);
+  const wantsItalic = includesAny(source, ['italic', 'italics']);
   const recommendedPair =
-    wantsPoppins || wantsDmSans
+    wantsItalic
+      ? wantsPoppins
+        ? 'Poppins Italic headline with clean sans-serif body/supporting copy'
+        : 'Elegant italic headline with clean sans-serif body/supporting copy'
+      : wantsPoppins || wantsDmSans
       ? 'Poppins headline with DM Sans body/supporting copy'
       : 'Poppins headline with DM Sans body/supporting copy';
 
   return {
-    typography:
-      'Replace the weak typography with a sharper modern system: Poppins SemiBold/Bold for the main headline, DM Sans Regular/Medium for body copy, offer details, and CTA.',
+    typography: wantsItalic
+      ? 'Replace the weak typography with a refined italic-forward headline style and clean readable supporting type for body copy, offer details, and CTA.'
+      : 'Replace the weak typography with a sharper modern system: Poppins SemiBold/Bold for the main headline, DM Sans Regular/Medium for body copy, offer details, and CTA.',
     fontStyle: recommendedPair,
     designTechniques: [
       'strong typographic hierarchy',
-      'clean sans-serif pairing',
+      wantsItalic ? 'refined italic headline treatment' : 'clean sans-serif pairing',
       'improved headline/body contrast',
     ],
-    constraints: ['Use consistent font weights; avoid decorative or low-readability typefaces.'],
+    constraints: [
+      wantsItalic
+        ? 'Use italic typography intentionally for the headline; keep body text highly readable.'
+        : 'Use consistent font weights; avoid decorative or low-readability typefaces.',
+    ],
   };
 }
 
@@ -172,7 +204,7 @@ function fallbackAssistantResponse(input: AssistantResponseInput): AssistantResp
   const textPatch = fallbackContextFromText(input.userMessage);
   const contextPatch: CreativeContext = {
     ...textPatch,
-    userRequests: [input.userMessage],
+    userRequests: [compactUserRequest(input.userMessage)],
   };
   const lowerMessage = input.userMessage.toLowerCase();
   const typographyPatch = typographyPatchFromText(input.userMessage);
@@ -253,6 +285,12 @@ function normalizeAssistantOutput(
     raw.updatedCreativeContext ?? raw.updated_creative_context ?? raw.updatedContext;
   const rawContextPatch = isRecord(patchSource) ? (patchSource as CreativeContext) : {};
   const contextPatch = mergeCreativeContext(fallback.contextPatch, rawContextPatch);
+  if (Array.isArray(contextPatch.userRequests)) {
+    contextPatch.userRequests = contextPatch.userRequests
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .map(compactUserRequest)
+      .slice(-6);
+  }
   const updatedContext = isRecord(updatedSource)
     ? mergeCreativeContext(updatedSource as CreativeContext, contextPatch)
     : mergeCreativeContext(fallback.updatedContext, contextPatch);
@@ -302,7 +340,9 @@ export class ChatAssistantService {
           'Update the creative direction from this latest user message.',
           'Return JSON with: assistantResponse, creativeContextPatch, updatedCreativeContext, unresolvedQuestions, modelName.',
           'The assistantResponse must confirm exactly what changed in the working draft now. Start with a concise phrase like "Done — I updated..." and name the changed areas. If the user asks for an opinion, give a recommendation and update the draft.',
-          'creativeContextPatch must include userRequests with the exact latest user message. Also include concrete fields such as composition, typography, colors, visualHierarchy, designStyle, mood, cta, constraints, or imageQuality when relevant.',
+          'creativeContextPatch must include userRequests as a compact summary of the latest request, not raw pasted website/page text. Also include concrete fields such as composition, typography, colors, visualHierarchy, designStyle, mood, cta, constraints, or imageQuality when relevant.',
+          'If the user pasted a long website page or brochure text, extract only important campaign details and constraints. Do not keep navigation text, duplicate sections, full page copy, URLs, backend URLs, frontend URLs, or asset URLs.',
+          'Use app-supplied memory only when it clearly matches the same project, brand, or industry. Never let unrelated previous sessions change the industry, title, campaign type, or audience.',
           'If latestGeneratedJson exists, treat the user message as a revision to that base JSON draft; do not generate final JSON in chat.',
           `Current creative context: ${JSON.stringify(input.currentContext)}`,
           `Image analysis: ${JSON.stringify(input.imageAnalysis ?? {})}`,

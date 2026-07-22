@@ -163,6 +163,7 @@ export class ImageAnalysisService {
               `Return a JSON object with these camelCase fields: ${analysisFields.join(', ')}.`,
               'The creativeContext field must be a compact reusable object for future generation.',
               'Explain why the creative works, not only what is visible.',
+              'Use relevant previous memory only when it clearly matches the same project, brand, or industry. Never let unrelated previous sessions override the uploaded image or user note.',
               `User note: ${input.promptText?.trim() || 'No extra note provided.'}`,
               `Brand context: ${JSON.stringify(input.brandContext ?? {})}`,
               `Relevant previous memory: ${JSON.stringify(input.memoryContext ?? [])}`,

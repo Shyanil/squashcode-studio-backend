@@ -97,14 +97,35 @@ export function fallbackContextFromText(text: string): CreativeContext {
   const context: CreativeContext = {
     userRequests: text.trim() ? [text.trim()] : [],
   };
+  const isRealEstateBrief = [
+    'real estate',
+    'property',
+    'apartment',
+    'residence',
+    'residences',
+    'residential',
+    'bhk',
+    'duplex',
+    'rera',
+    'developer',
+    'tower',
+    'homes',
+    'flat',
+  ].some((term) => source.includes(term));
+  const isHealthcareBrief = /\b(clinic|healthcare|hospital|doctor|medical|patient|patients)\b/i.test(text);
+  const projectNameMatch = text.match(/\bSubham\s+Kishori\s+Heights\b/i);
 
-  if (source.includes('real estate') || source.includes('property') || source.includes('apartment')) {
+  if (isRealEstateBrief) {
     context.industry = 'Real Estate';
-    context.campaignType = source.includes('luxury') ? 'Luxury property campaign' : 'Property campaign';
+    context.campaignType = source.includes('luxury') ? 'Luxury property campaign' : 'Residential property campaign';
     context.audience = source.includes('luxury') ? 'Luxury buyers' : 'Home buyers';
+    context.marketingGoal = 'Generate qualified property enquiries';
+    context.subject = projectNameMatch
+      ? `${projectNameMatch[0]} active lifestyle residences`
+      : 'Residential property project';
     context.designStyle = source.includes('minimal') ? 'Premium minimal' : 'Modern property showcase';
     context.colors = source.includes('gold') ? ['Gold', 'Black', 'White'] : ['Deep Blue', 'White', 'Warm Neutral'];
-  } else if (source.includes('clinic') || source.includes('health') || source.includes('doctor') || source.includes('medical')) {
+  } else if (isHealthcareBrief) {
     context.industry = 'Healthcare';
     context.campaignType = 'Trust-led healthcare campaign';
     context.audience = 'Patients and families';

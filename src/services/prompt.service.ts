@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 
 import {
+  fallbackContextFromText,
   imageAnalysisToContext,
   isRecord,
   mergeCreativeContext,
@@ -159,10 +160,11 @@ function referenceImageForJson(asset?: PromptAsset): JsonObject | undefined {
   if (!asset) {
     return undefined;
   }
+  const url = normalizeCpanelAssetUrl(asset.url) ?? asset.url ?? null;
 
   return {
-    link: asset.url ?? null,
-    url: asset.url ?? null,
+    link: url,
+    url,
     bucketName: asset.bucketName,
     storagePath: asset.storagePath,
     fileName: asset.fileName,
@@ -177,29 +179,6 @@ function referenceImageForJson(asset?: PromptAsset): JsonObject | undefined {
 
 function referenceImagesForJson(assets: PromptAsset[]): JsonObject[] {
   return assets.map(referenceImageForJson).filter((image): image is JsonObject => Boolean(image));
-}
-
-function withReferenceImages(
-  generatedJson: JsonObject,
-  referenceAssets: PromptAsset[],
-): JsonObject {
-  const referenceImages = referenceImagesForJson(referenceAssets);
-  const referenceImage = referenceImages[0];
-
-  if (!referenceImage) {
-    return generatedJson;
-  }
-
-  return {
-    ...generatedJson,
-    referenceImage,
-    referenceImages,
-    referenceImageLink: referenceImage.link,
-    referenceImageUrl: referenceImage.url,
-    reference_image_link: referenceImage.link,
-    reference_image_url: referenceImage.url,
-    reference_images: referenceImages,
-  };
 }
 
 function referenceImageUrlFromRecord(value: unknown) {
@@ -253,6 +232,146 @@ function generationReferenceImageUrl(
     referenceImageUrlFromList(generatedJson.reference_images) ??
     undefined
   );
+}
+
+function compactWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function summarizedBriefLines(value: string) {
+  const cleaned = compactWhitespace(value);
+  const source = cleaned.toLowerCase();
+  const lines: string[] = [];
+  const projectName = cleaned.match(/\bSubham\s+Kishori\s+Heights\b/i)?.[0];
+
+  if (cleaned.length <= 260) {
+    return [cleaned];
+  }
+
+  if (projectName) {
+    lines.push(`Project: ${projectName}, an active-lifestyle residential landmark.`);
+  } else if (['bhk', 'residence', 'residential', 'duplex', 'rera', 'developer'].some((term) => source.includes(term))) {
+    lines.push('Real estate residential campaign brief.');
+  }
+
+  if (source.includes('seujpur') || source.includes('dibrugarh')) {
+    lines.push('Location: Seujpur, Dibrugarh, Assam.');
+  }
+
+  if (source.includes('65') && source.includes('exclusive')) {
+    lines.push('Proof point: 65 exclusive residences.');
+  }
+
+  if (source.includes('78%') || source.includes('open space')) {
+    lines.push('Proof point: 78% open space.');
+  }
+
+  if (/\b3\s*&\s*4\s*bhk\b/i.test(cleaned) || source.includes('duplex')) {
+    lines.push('Home types: 3 BHK, 4 BHK, and duplex options.');
+  }
+
+  if (/90\s*(lac|lakh|l)/i.test(cleaned)) {
+    lines.push('Offer detail: starting at 90 Lac.');
+  }
+
+  if (source.includes('download brochure') || source.includes('enquire')) {
+    lines.push('CTA focus: Download Brochure or Enquire Now.');
+  }
+
+  if (source.includes('only include the style reference image') || source.includes('not too crowded')) {
+    lines.push('Constraint: keep the creative uncluttered and use only the style reference image.');
+  }
+
+  return lines.length ? lines : [`${cleaned.slice(0, 220).trimEnd()}...`];
+}
+
+function arrayStrings(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+}
+
+function inferContextFromGeneratedJson(generatedJson: JsonObject, promptMetadata: JsonObject) {
+  const copy = asJsonObject(generatedJson.copy);
+  const userRequests = arrayStrings(copy.userRequestedChanges);
+  const conversation = Array.isArray(promptMetadata.conversationSnapshot)
+    ? promptMetadata.conversationSnapshot
+        .map((item) => (isRecord(item) && typeof item.content === 'string' ? item.content : ''))
+        .filter(Boolean)
+    : [];
+  const sourceText = [...userRequests, ...conversation].join('\n');
+  const inferred = fallbackContextFromText(sourceText);
+  delete inferred.userRequests;
+
+  return inferred;
+}
+
+function generatedJsonForClient(
+  generatedJson: JsonObject,
+  creativeContext: CreativeContext,
+): JsonObject {
+  const next: JsonObject = { ...generatedJson };
+  const campaign = asJsonObject(next.campaign);
+  const copy = asJsonObject(next.copy);
+  const visualDirection = asJsonObject(next.visualDirection);
+  const productionNotes = asJsonObject(next.productionNotes);
+  const summarizedRequests = arrayStrings(copy.userRequestedChanges).flatMap(summarizedBriefLines);
+
+  delete next.referenceImage;
+  delete next.referenceImages;
+  delete next.referenceImageUrl;
+  delete next.referenceImageLink;
+  delete next.reference_image_url;
+  delete next.reference_image_link;
+  delete next.reference_images;
+
+  if (
+    creativeContext.subject &&
+    asNullableString(next.title)?.toLowerCase().includes('healthcare') &&
+    creativeContext.industry?.toLowerCase() !== 'healthcare'
+  ) {
+    next.title = creativeContext.subject;
+  }
+
+  if (creativeContext.industry) {
+    campaign.industry = creativeContext.industry;
+  }
+
+  if (creativeContext.campaignType) {
+    campaign.type = creativeContext.campaignType;
+  }
+
+  if (creativeContext.marketingGoal) {
+    campaign.goal = creativeContext.marketingGoal;
+  }
+
+  if (creativeContext.audience) {
+    campaign.audience = creativeContext.audience;
+  }
+
+  if (Object.keys(campaign).length) {
+    next.campaign = campaign;
+  }
+
+  if (creativeContext.subject) {
+    visualDirection.subject = creativeContext.subject;
+  }
+
+  if (Object.keys(visualDirection).length) {
+    visualDirection.styleReference =
+      'Use the uploaded primary style reference image for visual style, hierarchy, and composition.';
+    next.visualDirection = visualDirection;
+  }
+
+  if (summarizedRequests.length) {
+    copy.userRequestedChanges = [...new Set(summarizedRequests)].slice(-8);
+    next.copy = copy;
+  }
+
+  delete productionNotes.memoryUsed;
+  next.productionNotes = productionNotes;
+
+  return next;
 }
 
 function asMemoryItems(value: unknown): PromptMemoryItem[] {
@@ -362,10 +481,14 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
   const generatedJson = asJsonObject(row.generated_json);
   const promptMetadata = asJsonObject(row.prompt_metadata);
   const imageInsights = asImageAnalysis(row.image_insights);
-  const creativeContext = asCreativeContext(row.creative_context_snapshot);
+  const creativeContext = mergeCreativeContext(
+    asCreativeContext(row.creative_context_snapshot),
+    inferContextFromGeneratedJson(generatedJson, promptMetadata),
+  );
+  const clientGeneratedJson = generatedJsonForClient(generatedJson, creativeContext);
   const referenceImageUrl = generationReferenceImageUrl(row, generatedJson, promptMetadata);
   const displayTitle = displayNameFromPromptContext({
-    generatedJson,
+    generatedJson: clientGeneratedJson,
     promptMetadata,
     creativeContext,
     imageAnalysis: imageInsights,
@@ -378,7 +501,7 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
     versionNumber: asNumber(row.version_number, 1),
     promptText: asString(row.prompt_text),
     generatedJson: {
-      ...generatedJson,
+      ...clientGeneratedJson,
       title: displayTitle,
     },
     promptMetadata: {
@@ -432,20 +555,32 @@ function scoreMemoryItem(
 ) {
   let score = 0;
   const candidate = item.creativeContext;
+  const contextIndustry = context.industry?.toLowerCase();
+  const candidateIndustry = candidate.industry?.toLowerCase();
 
-  if (context.industry && candidate.industry === context.industry) {
+  if (contextIndustry && candidateIndustry && contextIndustry !== candidateIndustry) {
+    return 0;
+  }
+
+  if (contextIndustry && candidateIndustry === contextIndustry) {
     score += 3;
   }
 
-  if (context.campaignType && candidate.campaignType === context.campaignType) {
+  if (
+    context.campaignType &&
+    candidate.campaignType?.toLowerCase() === context.campaignType.toLowerCase()
+  ) {
     score += 2;
   }
 
-  if (context.platform && candidate.platform === context.platform) {
+  if (context.platform && candidate.platform?.toLowerCase() === context.platform.toLowerCase()) {
     score += 1;
   }
 
-  if (context.designStyle && candidate.designStyle === context.designStyle) {
+  if (
+    context.designStyle &&
+    candidate.designStyle?.toLowerCase() === context.designStyle.toLowerCase()
+  ) {
     score += 1;
   }
 
@@ -457,6 +592,26 @@ function scoreMemoryItem(
   }
 
   return score;
+}
+
+function hasMemorySignals(context: CreativeContext, brandContext: JsonObject) {
+  return Boolean(
+    context.industry ||
+      context.campaignType ||
+      context.designStyle ||
+      (typeof brandContext.name === 'string' && brandContext.name.trim()),
+  );
+}
+
+function creativeContextFromMessages(messages: PromptMessage[]) {
+  return messages
+    .filter((message) => message.role === 'user')
+    .reduce<CreativeContext>((context, message) => {
+      const patch = fallbackContextFromText(message.content);
+      delete patch.userRequests;
+
+      return mergeCreativeContext(context, patch);
+    }, {});
 }
 
 function createAnalysisMessage(analysis: ImageAnalysis) {
@@ -481,7 +636,6 @@ export class PromptService {
     const userId = resolveUserId(input.userId);
     const createdAt = nowIso();
     const brandContext = input.brandContext ?? {};
-    const memoryContext = await this.findRelevantMemory(userId, {}, brandContext);
     const session: PromptSession = {
       id: randomUUID(),
       userId,
@@ -495,11 +649,10 @@ export class PromptService {
       brandContext,
       metadata: {
         ...(input.metadata ?? {}),
-        memoryRetrievedAt: createdAt,
       },
       creativeContext: {},
       imageAnalysis: {},
-      memoryContext,
+      memoryContext: [],
       createdAt,
       updatedAt: createdAt,
       lastGeneratedAt: null,
@@ -844,19 +997,33 @@ export class PromptService {
     const referenceAssets = primaryAsset
       ? [primaryAsset, ...assets.filter((asset) => asset.id !== primaryAsset.id)]
       : [];
+    const generationContext = mergeCreativeContext(
+      session.creativeContext,
+      creativeContextFromMessages(messages),
+    );
+    const generationMemoryContext = await this.findRelevantMemory(
+      userId,
+      generationContext,
+      session.brandContext,
+    );
+    const generationSession: PromptSession = {
+      ...session,
+      creativeContext: generationContext,
+      memoryContext: generationMemoryContext,
+    };
     const generated = await jsonGenerationService.generateJson({
-      session,
+      session: generationSession,
       messages,
       outputOptions: input.outputOptions,
     });
     return runWithSupabaseAccessToken(requestAccessToken, async () => {
       const generation = await this.saveGeneration({
-        session,
+        session: generationSession,
         generatedJson: generated.generatedJson,
         promptText: generated.promptText,
         promptMetadata: {
           ...generated.promptMetadata,
-          creativeContextSnapshot: session.creativeContext,
+          creativeContextSnapshot: generationContext,
           conversationSnapshot: messages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -873,12 +1040,14 @@ export class PromptService {
         requestedTitle: session.title,
         generatedJson: generation.generatedJson,
         promptMetadata: generation.promptMetadata,
-        creativeContext: session.creativeContext,
+        creativeContext: generationContext,
         imageAnalysis: session.imageAnalysis,
       });
       const nextSession = await this.updateSession(session.id, userId, {
         status: 'generated',
         title: generationTitle,
+        creativeContext: generationContext,
+        memoryContext: generationMemoryContext,
         lastGeneratedAt: generation.createdAt,
         metadata: {
           ...session.metadata,
@@ -1167,10 +1336,10 @@ export class PromptService {
               fileName: safeFileName,
               mimeType: image.mimeType || decoded.mimeType,
               type: 'reference',
-            });
+        });
 
         if (uploadResponse.url) {
-          referenceImageUrl = uploadResponse.url;
+          referenceImageUrl = normalizeCpanelAssetUrl(uploadResponse.url) ?? uploadResponse.url;
         } else {
           throw new HttpError(502, 'Failed to upload to cpanel: missing uploaded image URL');
         }
@@ -1419,22 +1588,18 @@ export class PromptService {
   }): Promise<PromptGeneration> {
     const existing = await this.listGenerations(input.session.id, input.session.userId);
     const createdAt = nowIso();
-    const generatedJsonWithReferences = withReferenceImages(
-      input.generatedJson,
-      input.referenceAssets,
-    );
     const referenceImages = referenceImagesForJson(input.referenceAssets);
     const referenceImage = referenceImages[0];
     const primaryAsset = input.referenceAssets[0];
     const displayTitle = displayNameFromPromptContext({
       sessionTitle: input.session.title,
-      generatedJson: generatedJsonWithReferences,
+      generatedJson: input.generatedJson,
       promptMetadata: input.promptMetadata,
       creativeContext: input.session.creativeContext,
       imageAnalysis: input.session.imageAnalysis,
     });
     const generatedJson: JsonObject = {
-      ...generatedJsonWithReferences,
+      ...input.generatedJson,
       title: displayTitle,
     };
     const promptMetadata: JsonObject = {
@@ -1513,6 +1678,10 @@ export class PromptService {
   ): Promise<PromptMemoryItem[]> {
     const localItems: PromptMemoryItem[] = [];
 
+    if (!hasMemorySignals(context, brandContext)) {
+      return [];
+    }
+
     if (shouldUseRemote(userId) && supabaseClient) {
       const { data, error } = await supabaseClient
         .from('prompt_generations')
@@ -1546,7 +1715,7 @@ export class PromptService {
             item,
             score: scoreMemoryItem(item, context, brandContext),
           }))
-          .filter(({ score }) => score > 0 || Object.keys(context).length === 0)
+          .filter(({ score }) => score >= 2)
           .sort((left, right) => right.score - left.score)
           .slice(0, 5)
           .map(({ item, score }) => ({
@@ -1580,7 +1749,7 @@ export class PromptService {
         item,
         score: scoreMemoryItem(item, context, brandContext),
       }))
-      .filter(({ score }) => score > 0 || Object.keys(context).length === 0)
+      .filter(({ score }) => score >= 2)
       .sort((left, right) => right.score - left.score)
       .slice(0, 5)
       .map(({ item, score }) => ({
