@@ -12,6 +12,7 @@ export const env = {
   cpanelSupportingUploadUrl:
     process.env.CPANEL_SUPPORTING_UPLOAD_URL ??
     'https://api.squashcode-studio.7sc.in/upload_supporting.php',
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY ?? '',
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY ?? '',
   supabaseUrl: process.env.SUPABASE_URL ?? '',
 };

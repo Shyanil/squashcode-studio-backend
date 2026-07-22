@@ -34,9 +34,14 @@ Set the required environment variables in Render before deploying:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 
+`SUPABASE_SERVICE_ROLE_KEY` is preferred for server-side fallback operations. If you do not set it,
+set `SUPABASE_ANON_KEY`; authenticated API requests forward the user's bearer token to Supabase so
+RLS policies using `auth.uid()` continue to pass.
+
 Optional environment variables:
 
 - `OPENAI_MODEL` defaults to `gpt-5`.
+- `SUPABASE_ANON_KEY` can be used when all database access should run through user-scoped RLS.
 - `CORS_ORIGIN` accepts comma-separated deployed frontend origins. Use `https://squashcode-studio.netlify.app` for the Netlify frontend.
 - `CPANEL_UPLOAD_DELETE_URL` defaults to `https://api.squashcode-studio.7sc.in/upload_delete.php`.
 - `CPANEL_SUPPORTING_UPLOAD_URL` defaults to `https://api.squashcode-studio.7sc.in/upload_supporting.php`.
