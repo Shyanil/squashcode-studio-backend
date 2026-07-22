@@ -126,6 +126,27 @@ export const promptController = {
     response.status(200).json({ data: detail });
   }),
 
+  renameSession: asyncHandler(async (request: Request, response: Response) => {
+    const body = jsonBody(request);
+    const title = asString(body.title);
+
+    if (!title?.trim()) {
+      throw new HttpError(400, 'title is required.');
+    }
+
+    const session = await promptService.renameSession({
+      userId: requestUserId(request),
+      sessionId: requireSessionId(request),
+      title,
+    });
+
+    if (!session) {
+      throw new HttpError(404, 'Prompt session not found.');
+    }
+
+    response.status(200).json({ data: session });
+  }),
+
   analyzeImage: asyncHandler(async (request: Request, response: Response) => {
     const body = jsonBody(request);
     const result = await promptService.analyzeSessionImage({

@@ -12,6 +12,13 @@ export interface CpanelUploadResult {
   url?: string;
 }
 
+const cpanelPublicOrigin = 'https://api.squashcode-studio.7sc.in';
+const cpanelAssetHosts = new Set([
+  'api.squashcode-studio.7sc.in',
+  'squashcode-studio.7sc.in',
+  'www.squashcode-studio.7sc.in',
+]);
+
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -20,6 +27,34 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+export function normalizeCpanelAssetUrl(value?: string) {
+  const rawValue = asString(value);
+
+  if (!rawValue || rawValue.startsWith('data:')) {
+    return rawValue;
+  }
+
+  if (rawValue.startsWith('//')) {
+    return normalizeCpanelAssetUrl(`https:${rawValue}`);
+  }
+
+  try {
+    const isAbsolute = /^[a-z][a-z\d+\-.]*:/i.test(rawValue);
+    const url = new URL(rawValue, cpanelPublicOrigin);
+
+    if (!isAbsolute || cpanelAssetHosts.has(url.hostname)) {
+      url.protocol = 'https:';
+      url.hostname = 'api.squashcode-studio.7sc.in';
+      url.port = '';
+      return url.toString();
+    }
+
+    return rawValue;
+  } catch {
+    return rawValue;
+  }
 }
 
 function uploadErrorMessage(data: unknown): string | undefined {
@@ -57,7 +92,7 @@ export class CpanelAssetService {
       filename: asString(data.filename) ?? input.fileName,
       raw: response.data,
       subfolder: asString(data.subfolder) ?? asString(data.folder),
-      url: asString(data.url) ?? asString(data.link),
+      url: normalizeCpanelAssetUrl(asString(data.url) ?? asString(data.link)),
     };
   }
 
@@ -86,7 +121,7 @@ export class CpanelAssetService {
       filename: asString(data.filename) ?? input.fileName,
       raw: response.data,
       subfolder: asString(data.subfolder) ?? asString(data.folder),
-      url: asString(data.url) ?? asString(data.link),
+      url: normalizeCpanelAssetUrl(asString(data.url) ?? asString(data.link)),
     };
   }
 

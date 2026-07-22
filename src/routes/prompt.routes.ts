@@ -8,6 +8,7 @@ promptRouter.get('/sessions', promptController.listSessions);
 promptRouter.get('/generations', promptController.listGenerations);
 promptRouter.post('/sessions', promptController.createSession);
 promptRouter.get('/sessions/:sessionId', promptController.getSession);
+promptRouter.patch('/sessions/:sessionId', promptController.renameSession);
 promptRouter.post('/sessions/:sessionId/image', promptController.analyzeImage);
 promptRouter.post('/sessions/:sessionId/assets', promptController.addAsset);
 promptRouter.post('/sessions/:sessionId/messages', promptController.sendMessage);

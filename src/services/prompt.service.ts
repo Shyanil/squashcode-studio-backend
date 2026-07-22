@@ -5,7 +5,7 @@ import {
   isRecord,
   mergeCreativeContext,
 } from '@/openai/creativeContext.utils';
-import { cpanelAssetService } from '@/services/cpanelAsset.service';
+import { cpanelAssetService, normalizeCpanelAssetUrl } from '@/services/cpanelAsset.service';
 import { chatAssistantService } from '@/openai/chatAssistant.service';
 import { imageAnalysisService } from '@/openai/imageAnalysis.service';
 import { jsonGenerationService } from '@/openai/jsonGeneration.service';
@@ -25,6 +25,10 @@ import type {
 } from '@/models/prompt.model';
 import { supabaseClient } from '@/supabase/client';
 import { HttpError } from '@/utils/httpError';
+import {
+  displayNameForPromptSession,
+  displayNameFromPromptContext,
+} from '@/utils/displayName';
 
 export const LOCAL_PROMPT_USER_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -84,6 +88,10 @@ function nowIso() {
 
 function resolveUserId(userId?: string) {
   return userId?.trim() || LOCAL_PROMPT_USER_ID;
+}
+
+function userScopeIds(userId?: string) {
+  return [...new Set([resolveUserId(userId), LOCAL_PROMPT_USER_ID])];
 }
 
 function shouldUseRemote(userId: string) {
@@ -210,11 +218,17 @@ function asMessageRole(value: unknown): PromptMessageRole {
 
 function mapSession(row: SupabaseRow): PromptSession {
   const metadata = asJsonObject(row.metadata);
+  const creativeContext = asCreativeContext(row.creative_context ?? metadata.creative_context);
+  const imageAnalysis = asImageAnalysis(row.image_analysis ?? metadata.image_analysis);
 
   return {
     id: asString(row.id),
     userId: asString(row.user_id),
-    title: asString(row.title, 'Untitled prompt'),
+    title: displayNameForPromptSession({
+      requestedTitle: asString(row.title, 'Untitled prompt'),
+      creativeContext,
+      imageAnalysis,
+    }),
     sourceType: asSourceType(row.source_type),
     status:
       row.status === 'draft' ||
@@ -225,8 +239,8 @@ function mapSession(row: SupabaseRow): PromptSession {
         : 'draft',
     brandContext: asJsonObject(row.brand_context),
     metadata,
-    creativeContext: asCreativeContext(row.creative_context ?? metadata.creative_context),
-    imageAnalysis: asImageAnalysis(row.image_analysis ?? metadata.image_analysis),
+    creativeContext,
+    imageAnalysis,
     memoryContext: asMemoryItems(row.memory_context ?? metadata.memory_context),
     createdAt: asString(row.created_at, nowIso()),
     updatedAt: asString(row.updated_at, nowIso()),
@@ -262,9 +276,11 @@ function mapAsset(row: SupabaseRow): PromptAsset {
     width: row.width === null ? undefined : asNumber(row.width),
     height: row.height === null ? undefined : asNumber(row.height),
     url:
-      asNullableString(row.reference_image_url) ??
-      asNullableString(metadata.referenceImageUrl) ??
-      undefined,
+      normalizeCpanelAssetUrl(
+        asNullableString(row.reference_image_url) ??
+          asNullableString(metadata.referenceImageUrl) ??
+          undefined,
+      ) ?? undefined,
     cpanelFilename:
       asNullableString(row.cpanel_filename) ??
       asNullableString(metadata.cpanelFilename) ??
@@ -286,17 +302,34 @@ function mapAsset(row: SupabaseRow): PromptAsset {
 }
 
 function mapGeneration(row: SupabaseRow): PromptGeneration {
+  const generatedJson = asJsonObject(row.generated_json);
+  const promptMetadata = asJsonObject(row.prompt_metadata);
+  const imageInsights = asImageAnalysis(row.image_insights);
+  const creativeContext = asCreativeContext(row.creative_context_snapshot);
+  const displayTitle = displayNameFromPromptContext({
+    generatedJson,
+    promptMetadata,
+    creativeContext,
+    imageAnalysis: imageInsights,
+  });
+
   return {
     id: asString(row.id),
     sessionId: asString(row.session_id),
     userId: asString(row.user_id),
     versionNumber: asNumber(row.version_number, 1),
     promptText: asString(row.prompt_text),
-    generatedJson: asJsonObject(row.generated_json),
-    promptMetadata: asJsonObject(row.prompt_metadata),
-    imageInsights: asImageAnalysis(row.image_insights),
+    generatedJson: {
+      ...generatedJson,
+      title: displayTitle,
+    },
+    promptMetadata: {
+      ...promptMetadata,
+      displayTitle,
+    },
+    imageInsights,
     referenceImagePath: asNullableString(row.reference_image_path) ?? undefined,
-    referenceImageUrl: asNullableString(row.reference_image_url) ?? undefined,
+    referenceImageUrl: normalizeCpanelAssetUrl(asNullableString(row.reference_image_url) ?? undefined),
     modelName: asNullableString(row.model_name) ?? undefined,
     aspectRatio: asString(row.aspect_ratio, '1:1'),
     quality: asString(row.quality, 'high'),
@@ -394,7 +427,11 @@ export class PromptService {
     const session: PromptSession = {
       id: randomUUID(),
       userId,
-      title: input.title?.trim() || 'Untitled prompt',
+      title: displayNameForPromptSession({
+        requestedTitle: input.title,
+        creativeContext: {},
+        imageAnalysis: {},
+      }),
       sourceType: input.sourceType ?? 'mixed',
       status: 'active',
       brandContext,
@@ -480,6 +517,34 @@ export class PromptService {
     return { session, messages, generations, assets };
   }
 
+  async renameSession(input: {
+    userId?: string;
+    sessionId: string;
+    title: string;
+  }): Promise<PromptSession | null> {
+    const userId = resolveUserId(input.userId);
+    const session = await this.getSession(input.sessionId, userId);
+
+    if (!session) {
+      return null;
+    }
+
+    const displayTitle = displayNameForPromptSession({
+      requestedTitle: input.title,
+      creativeContext: session.creativeContext,
+      imageAnalysis: session.imageAnalysis,
+    });
+
+    return this.updateSession(session.id, userId, {
+      title: displayTitle,
+      metadata: {
+        ...session.metadata,
+        displayTitle,
+        manualTitle: displayTitle,
+      },
+    });
+  }
+
   async listSessions(input: ListSessionsInput): Promise<PromptSession[]> {
     const userId = resolveUserId(input.userId);
 
@@ -538,10 +603,11 @@ export class PromptService {
     const nextSession = await this.updateSession(session.id, userId, {
       sourceType: session.sourceType === 'text' ? 'mixed' : 'image',
       status: 'active',
-      title:
-        session.title === 'Untitled prompt'
-          ? `${analysis.industry ?? 'Creative'} ${analysis.campaignType ?? 'Prompt'}`
-          : session.title,
+      title: displayNameForPromptSession({
+        requestedTitle: session.title,
+        creativeContext,
+        imageAnalysis: analysis,
+      }),
       creativeContext,
       imageAnalysis: analysis,
       memoryContext: refreshedMemory,
@@ -734,11 +800,20 @@ export class PromptService {
       imageCount: generated.imageCount,
       referenceAssets,
     });
+    const generationTitle = displayNameForPromptSession({
+      requestedTitle: session.title,
+      generatedJson: generation.generatedJson,
+      promptMetadata: generation.promptMetadata,
+      creativeContext: session.creativeContext,
+      imageAnalysis: session.imageAnalysis,
+    });
     const nextSession = await this.updateSession(session.id, userId, {
       status: 'generated',
+      title: generationTitle,
       lastGeneratedAt: generation.createdAt,
       metadata: {
         ...session.metadata,
+        displayTitle: generationTitle,
         latestGenerationId: generation.id,
         latestGenerationVersion: generation.versionNumber,
       },
@@ -759,7 +834,7 @@ export class PromptService {
     const detail = await this.createSession({
       userId: input.userId,
       sourceType: input.image ? 'image' : 'text',
-      title: input.promptText?.slice(0, 80) || 'JSON prompt draft',
+      title: displayNameForPromptSession({ requestedTitle: input.promptText }),
     });
 
     if (input.image) {
@@ -791,7 +866,7 @@ export class PromptService {
       const detail = await this.createSession({
         userId: input.userId,
         sourceType: 'text',
-        title: input.content.slice(0, 80) || 'Chat-first prompt',
+        title: displayNameForPromptSession({ requestedTitle: input.content }),
       });
       return this.sendMessage({
         userId: detail.session.userId,
@@ -1156,12 +1231,13 @@ export class PromptService {
 
   public async listAllGenerations(input: { userId?: string }): Promise<PromptGeneration[]> {
     const userId = resolveUserId(input.userId);
+    const accessibleUserIds = userScopeIds(input.userId);
 
     if (shouldUseRemote(userId) && supabaseClient) {
       const { data, error } = await supabaseClient
         .from('prompt_generations')
         .select('*')
-        .eq('user_id', userId)
+        .in('user_id', accessibleUserIds)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -1176,7 +1252,7 @@ export class PromptService {
     const allGenerations: PromptGeneration[] = [];
     this.generations.forEach((generations) => {
       generations.forEach((generation) => {
-        if (generation.userId === userId) {
+        if (accessibleUserIds.includes(generation.userId)) {
           allGenerations.push(generation);
         }
       });
@@ -1192,13 +1268,14 @@ export class PromptService {
     userIdInput?: string,
   ): Promise<PromptGeneration | null> {
     const userId = resolveUserId(userIdInput);
+    const accessibleUserIds = userScopeIds(userIdInput);
 
     if (shouldUseRemote(userId) && supabaseClient) {
       const { data, error } = await supabaseClient
         .from('prompt_generations')
         .select('*')
         .eq('id', generationId)
-        .eq('user_id', userId)
+        .in('user_id', accessibleUserIds)
         .maybeSingle();
 
       if (error) {
@@ -1210,7 +1287,7 @@ export class PromptService {
 
     for (const generations of this.generations.values()) {
       const generation = generations.find(
-        (item) => item.id === generationId && item.userId === userId,
+        (item) => item.id === generationId && accessibleUserIds.includes(item.userId),
       );
 
       if (generation) {
@@ -1257,12 +1334,27 @@ export class PromptService {
   }): Promise<PromptGeneration> {
     const existing = await this.listGenerations(input.session.id, input.session.userId);
     const createdAt = nowIso();
-    const generatedJson = withReferenceImages(input.generatedJson, input.referenceAssets);
+    const generatedJsonWithReferences = withReferenceImages(
+      input.generatedJson,
+      input.referenceAssets,
+    );
     const referenceImages = referenceImagesForJson(input.referenceAssets);
     const referenceImage = referenceImages[0];
     const primaryAsset = input.referenceAssets[0];
+    const displayTitle = displayNameFromPromptContext({
+      sessionTitle: input.session.title,
+      generatedJson: generatedJsonWithReferences,
+      promptMetadata: input.promptMetadata,
+      creativeContext: input.session.creativeContext,
+      imageAnalysis: input.session.imageAnalysis,
+    });
+    const generatedJson: JsonObject = {
+      ...generatedJsonWithReferences,
+      title: displayTitle,
+    };
     const promptMetadata: JsonObject = {
       ...input.promptMetadata,
+      displayTitle,
       ...(referenceImage ? { referenceImage } : {}),
       ...(referenceImages.length ? { referenceImages } : {}),
     };

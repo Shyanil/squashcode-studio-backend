@@ -3,10 +3,15 @@ import { deflateSync } from 'zlib';
 import axios from 'axios';
 import { env } from '@/config/env';
 import { supabaseClient } from '@/supabase/client';
-import { cpanelAssetService, type CpanelAssetType } from '@/services/cpanelAsset.service';
+import {
+  cpanelAssetService,
+  normalizeCpanelAssetUrl,
+  type CpanelAssetType,
+} from '@/services/cpanelAsset.service';
 import { promptService } from '@/services/prompt.service';
 import type { JsonObject, PromptGeneration } from '@/models/prompt.model';
 import { HttpError } from '@/utils/httpError';
+import { displayNameForCreative } from '@/utils/displayName';
 import {
   imageGenerationService,
   openAIImageModel,
@@ -35,6 +40,7 @@ export interface CreativeModel {
 
 type CreativeVariant = CreativeModel['variant'];
 type Rgb = [number, number, number];
+const localCreativeUserId = '00000000-0000-4000-8000-000000000001';
 
 interface FallbackPngInput {
   title: string;
@@ -425,6 +431,10 @@ function asRecordArray(value: unknown) {
     : [];
 }
 
+function userScopeIds(userId?: string) {
+  return [...new Set([userId?.trim() || localCreativeUserId, localCreativeUserId])];
+}
+
 function asCpanelAssetType(value: unknown): CpanelAssetType | undefined {
   return value === 'generation' || value === 'reference' ? value : undefined;
 }
@@ -509,13 +519,24 @@ function cpanelTargetForCreative(creative: CreativeModel) {
   };
 }
 
-function mapCreativeRow(row: Record<string, unknown>): CreativeModel {
+function mapCreativeRow(
+  row: Record<string, unknown>,
+  promptGeneration?: {
+    generatedJson?: JsonObject;
+    promptMetadata?: JsonObject;
+    imageInsights?: Record<string, unknown>;
+  },
+): CreativeModel {
   const metadata = asRecord(row.metadata);
+  const referenceImageUrl =
+    normalizeCpanelAssetUrl(
+      asOptionalString(row.reference_image_url) ?? asOptionalString(metadata.referenceImageUrl),
+    ) ?? undefined;
 
   return {
     id: asString(row.id),
     userId: asString(row.user_id),
-    title: asString(row.title),
+    title: displayNameForCreative({ userNote: asString(row.title), promptGeneration }),
     brand: asString(row.brand, 'AI Creative Studio'),
     campaign: asString(row.campaign, 'AI Campaign'),
     tags: asStringArray(row.tags),
@@ -523,7 +544,7 @@ function mapCreativeRow(row: Record<string, unknown>): CreativeModel {
     aspectRatio: asString(row.aspect_ratio, '1:1'),
     variant: asString(row.variant, 'mint'),
     favorite: row.favorite === true,
-    imageUrl: asString(row.image_url),
+    imageUrl: normalizeCpanelAssetUrl(asString(row.image_url)) ?? '',
     createdAt: asString(row.created_at),
     cpanelFilename:
       asOptionalString(row.cpanel_filename) ?? asOptionalString(metadata.cpanelFilename),
@@ -532,8 +553,7 @@ function mapCreativeRow(row: Record<string, unknown>): CreativeModel {
     cpanelType: asCpanelAssetType(row.cpanel_type) ?? asCpanelAssetType(metadata.cpanelType),
     promptGenerationId:
       asOptionalString(row.prompt_generation_id) ?? asOptionalString(metadata.promptGenerationId),
-    referenceImageUrl:
-      asOptionalString(row.reference_image_url) ?? asOptionalString(metadata.referenceImageUrl),
+    referenceImageUrl,
   };
 }
 
@@ -610,6 +630,7 @@ export class CreativeService {
     title: string;
     brand?: string;
     campaign?: string;
+    creativeName?: string;
     tags?: string[];
     aspectRatio?: string;
     quality?: string;
@@ -617,7 +638,7 @@ export class CreativeService {
     promptGenerationId?: string;
     referenceImageUrl?: string;
   }): Promise<CreativeModel[]> {
-    const userId = input.userId || '00000000-0000-4000-8000-000000000001';
+    const userId = input.userId || localCreativeUserId;
     const brand = input.brand || 'AI Creative Studio';
     const campaign = input.campaign || 'AI Campaign';
     const tags = input.tags || ['AI Generated'];
@@ -641,11 +662,13 @@ export class CreativeService {
       throw new HttpError(404, 'Selected JSON prompt was not found.');
     }
 
-    const referenceImageUrls = input.referenceImageUrl
-      ? [input.referenceImageUrl]
-      : promptGeneration
-        ? referenceImageUrlsFromGeneration(promptGeneration)
-        : [];
+    const referenceImageUrls = (
+      input.referenceImageUrl
+        ? [input.referenceImageUrl]
+        : promptGeneration
+          ? referenceImageUrlsFromGeneration(promptGeneration)
+          : []
+    ).map((url) => normalizeCpanelAssetUrl(url) ?? url);
     const referenceImageUrl = referenceImageUrls[0];
 
     if (promptGeneration && !referenceImageUrls.length) {
@@ -659,16 +682,16 @@ export class CreativeService {
       await Promise.all(referenceImageUrls.map((url) => downloadReferenceImage(url)))
     ).filter((image): image is NonNullable<typeof image> => Boolean(image));
     const generationNote = input.title.trim();
-    const displayTitle =
-      generationNote ||
-      (promptGeneration
-        ? `Creative from JSON v${promptGeneration.versionNumber}`
-        : 'New Visual Concept');
+    const requestedCreativeName = input.creativeName?.trim();
+    const displayTitle = displayNameForCreative({
+      userNote: requestedCreativeName || generationNote,
+      promptGeneration,
+    });
 
     for (let index = 0; index < imageCount; index++) {
       const id = randomUUID();
       const variant = variants[Math.floor(Math.random() * variants.length)];
-      const title = `Option ${index + 1}: ${displayTitle.length > 25 ? displayTitle.slice(0, 22) + '...' : displayTitle}`;
+      const title = imageCount > 1 ? `${displayTitle} ${index + 1}` : displayTitle;
       const imageSize = imageSizeForAspectRatio(aspectRatio);
       const imageQuality = imageQualityForSetting(quality);
       const generationPrompt = buildGenerationPrompt({
@@ -745,6 +768,8 @@ export class CreativeService {
         cpanelFilename,
         cpanelSubfolder,
         cpanelType,
+        displayTitle: title,
+        manualTitle: requestedCreativeName || undefined,
         promptGenerationId: promptGeneration?.id,
         referenceImageUrl,
         referenceImageUrls,
@@ -753,7 +778,7 @@ export class CreativeService {
       const creativeItem: CreativeModel = {
         id,
         userId,
-        title: displayTitle,
+        title,
         brand,
         campaign,
         tags: [...tags, aspectRatio, quality],
@@ -820,27 +845,69 @@ export class CreativeService {
   }
 
   async listCreatives(userId?: string): Promise<CreativeModel[]> {
-    const activeUserId = userId || '00000000-0000-4000-8000-000000000001';
+    const accessibleUserIds = userScopeIds(userId);
 
     if (supabaseClient) {
       const { data, error } = await supabaseClient
         .from('creatives')
         .select('*')
-        .eq('user_id', activeUserId)
+        .in('user_id', accessibleUserIds)
         .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Failed to fetch creatives from database:', error);
       } else if (data) {
-        return (data as Record<string, unknown>[]).map(mapCreativeRow);
+        const creativeRows = data as Record<string, unknown>[];
+        const generationIds = Array.from(
+          new Set(
+            creativeRows
+              .map((row) => asOptionalString(row.prompt_generation_id))
+              .filter((id): id is string => Boolean(id)),
+          ),
+        );
+        const generationMap = new Map<
+          string,
+          {
+            generatedJson?: JsonObject;
+            promptMetadata?: JsonObject;
+            imageInsights?: Record<string, unknown>;
+          }
+        >();
+
+        if (generationIds.length) {
+          const { data: generationRows, error: generationError } = await supabaseClient
+            .from('prompt_generations')
+            .select('id, generated_json, prompt_metadata, image_insights')
+            .in('id', generationIds);
+
+          if (generationError) {
+            console.error('Failed to fetch creative prompt names:', generationError);
+          } else {
+            (generationRows as Record<string, unknown>[] | null)?.forEach((row) => {
+              const id = asOptionalString(row.id);
+
+              if (id) {
+                generationMap.set(id, {
+                  generatedJson: asRecord(row.generated_json),
+                  promptMetadata: asRecord(row.prompt_metadata),
+                  imageInsights: asRecord(row.image_insights),
+                });
+              }
+            });
+          }
+        }
+
+        return creativeRows.map((row) =>
+          mapCreativeRow(row, generationMap.get(asString(row.prompt_generation_id))),
+        );
       }
     }
 
-    return this.creatives.get(activeUserId) || [];
+    return accessibleUserIds.flatMap((id) => this.creatives.get(id) ?? []);
   }
 
   async deleteCreative(input: { id: string; userId?: string }): Promise<boolean> {
-    const activeUserId = input.userId || '00000000-0000-4000-8000-000000000001';
+    const accessibleUserIds = userScopeIds(input.userId);
     let creative: CreativeModel | undefined;
 
     if (supabaseClient) {
@@ -848,7 +915,7 @@ export class CreativeService {
         .from('creatives')
         .select('*')
         .eq('id', input.id)
-        .eq('user_id', activeUserId)
+        .in('user_id', accessibleUserIds)
         .maybeSingle();
 
       if (error) {
@@ -859,7 +926,9 @@ export class CreativeService {
     }
 
     if (!creative) {
-      creative = (this.creatives.get(activeUserId) ?? []).find((item) => item.id === input.id);
+      creative = accessibleUserIds
+        .flatMap((id) => this.creatives.get(id) ?? [])
+        .find((item) => item.id === input.id);
     }
 
     if (creative) {
@@ -878,18 +947,20 @@ export class CreativeService {
         .from('creatives')
         .delete()
         .eq('id', input.id)
-        .eq('user_id', activeUserId);
+        .in('user_id', accessibleUserIds);
 
       if (error) {
         console.error('Failed to delete creative:', error);
       }
     }
 
-    const userList = this.creatives.get(activeUserId) ?? [];
-    this.creatives.set(
-      activeUserId,
-      userList.filter((item) => item.id !== input.id),
-    );
+    accessibleUserIds.forEach((id) => {
+      const userList = this.creatives.get(id) ?? [];
+      this.creatives.set(
+        id,
+        userList.filter((item) => item.id !== input.id),
+      );
+    });
 
     return true;
   }
