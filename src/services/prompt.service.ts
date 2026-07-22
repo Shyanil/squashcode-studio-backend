@@ -95,10 +95,6 @@ function resolveUserId(userId?: string) {
   return userId?.trim() || LOCAL_PROMPT_USER_ID;
 }
 
-function userScopeIds(userId?: string) {
-  return [...new Set([resolveUserId(userId), LOCAL_PROMPT_USER_ID])];
-}
-
 function shouldUseRemote(userId: string) {
   void userId;
   return Boolean(supabaseClient);
@@ -1566,20 +1562,13 @@ export class PromptService {
 
   public async listAllGenerations(input: { userId?: string }): Promise<PromptGeneration[]> {
     const userId = resolveUserId(input.userId);
-    const accessibleUserIds = userScopeIds(input.userId);
     const readClient = supabaseAdminClient ?? supabaseClient;
 
     if (shouldUseRemote(userId) && readClient) {
-      const { data, error } = supabaseAdminClient
-        ? await readClient
-            .from('prompt_generations')
-            .select('*')
-            .order('created_at', { ascending: false })
-        : await readClient
-            .from('prompt_generations')
-            .select('*')
-            .in('user_id', accessibleUserIds)
-            .order('created_at', { ascending: false });
+      const { data, error } = await readClient
+        .from('prompt_generations')
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (error) {
         throwSupabaseError('prompt generation list', error);
@@ -1607,22 +1596,14 @@ export class PromptService {
     userIdInput?: string,
   ): Promise<PromptGeneration | null> {
     const userId = resolveUserId(userIdInput);
-    const accessibleUserIds = userScopeIds(userIdInput);
     const readClient = supabaseAdminClient ?? supabaseClient;
 
     if (shouldUseRemote(userId) && readClient) {
-      const { data, error } = supabaseAdminClient
-        ? await readClient
-            .from('prompt_generations')
-            .select('*')
-            .eq('id', generationId)
-            .maybeSingle()
-        : await readClient
-            .from('prompt_generations')
-            .select('*')
-            .eq('id', generationId)
-            .in('user_id', accessibleUserIds)
-            .maybeSingle();
+      const { data, error } = await readClient
+        .from('prompt_generations')
+        .select('*')
+        .eq('id', generationId)
+        .maybeSingle();
 
       if (error) {
         throwSupabaseError('prompt generation fetch', error);

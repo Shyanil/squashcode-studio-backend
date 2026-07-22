@@ -841,20 +841,14 @@ export class CreativeService {
   }
 
   async listCreatives(userId?: string): Promise<CreativeModel[]> {
-    const accessibleUserIds = userScopeIds(userId);
+    void userId;
     const readClient = supabaseAdminClient ?? supabaseClient;
 
     if (readClient) {
-      const { data, error } = supabaseAdminClient
-        ? await readClient
-            .from('creatives')
-            .select('*')
-            .order('created_at', { ascending: false })
-        : await readClient
-            .from('creatives')
-            .select('*')
-            .in('user_id', accessibleUserIds)
-            .order('created_at', { ascending: false });
+      const { data, error } = await readClient
+        .from('creatives')
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Failed to fetch creatives from database:', error);

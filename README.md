@@ -42,6 +42,10 @@ The internal Creative Generator uses server-side all-user reads for prompt gener
 creatives, so `SUPABASE_SERVICE_ROLE_KEY` must be set in Render for everyone on the team to see all
 reference images and JSON prompts.
 
+If Render is using `SUPABASE_ANON_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`, run
+`supabase-internal-read-policies.sql` in the Supabase SQL editor. It keeps RLS enabled, but allows
+authenticated team users to read all saved JSON presets, prompt assets, sessions, and creatives.
+
 Optional environment variables:
 
 - `OPENAI_MODEL` defaults to `gpt-5`.
