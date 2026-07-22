@@ -19,8 +19,43 @@ const fetchWithRequestAuth: typeof fetch = (input, init) => {
   });
 };
 
+function jwtRole(token: string) {
+  try {
+    const [, payload] = token.split('.');
+
+    if (!payload) {
+      return null;
+    }
+
+    const decodedPayload = Buffer.from(payload, 'base64url').toString('utf8');
+    const decoded = JSON.parse(decodedPayload) as { role?: unknown };
+
+    return typeof decoded.role === 'string' ? decoded.role : null;
+  } catch {
+    return null;
+  }
+}
+
+function configuredAnonKey() {
+  const explicitAnonKey = env.supabaseAnonKey.trim();
+
+  if (explicitAnonKey) {
+    return explicitAnonKey;
+  }
+
+  const serviceRoleEnvKey = env.supabaseServiceRoleKey.trim();
+
+  return jwtRole(serviceRoleEnvKey) === 'anon' ? serviceRoleEnvKey : '';
+}
+
+function configuredServiceRoleKey() {
+  const serviceRoleEnvKey = env.supabaseServiceRoleKey.trim();
+
+  return jwtRole(serviceRoleEnvKey) === 'service_role' ? serviceRoleEnvKey : '';
+}
+
 export function createSupabaseClient() {
-  const supabaseKey = env.supabaseServiceRoleKey || env.supabaseAnonKey;
+  const supabaseKey = configuredAnonKey() || configuredServiceRoleKey();
 
   if (!env.supabaseUrl || !supabaseKey) {
     return null;
@@ -38,11 +73,13 @@ export function createSupabaseClient() {
 }
 
 export function createSupabaseAdminClient() {
-  if (!env.supabaseUrl || !env.supabaseServiceRoleKey) {
+  const serviceRoleKey = configuredServiceRoleKey();
+
+  if (!env.supabaseUrl || !serviceRoleKey) {
     return null;
   }
 
-  return createClient(env.supabaseUrl, env.supabaseServiceRoleKey, {
+  return createClient(env.supabaseUrl, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,

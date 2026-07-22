@@ -32,17 +32,18 @@ Set the required environment variables in Render before deploying:
 
 - `OPENAI_API_KEY`
 - `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `SUPABASE_ANON_KEY` or a real `SUPABASE_SERVICE_ROLE_KEY`
 
-`SUPABASE_SERVICE_ROLE_KEY` is preferred for server-side fallback operations. If you do not set it,
-set `SUPABASE_ANON_KEY`; authenticated API requests forward the user's bearer token to Supabase so
-RLS policies using `auth.uid()` continue to pass.
+`SUPABASE_SERVICE_ROLE_KEY` is optional and must contain the real Supabase service-role key, not the
+anon key. If you do not set it, set `SUPABASE_ANON_KEY`; authenticated API requests forward the
+user's bearer token to Supabase so RLS policies using `auth.uid()` continue to pass.
 
-The internal Creative Generator uses server-side all-user reads for prompt generations and generated
-creatives, so `SUPABASE_SERVICE_ROLE_KEY` must be set in Render for everyone on the team to see all
-reference images and JSON prompts.
+The internal Creative Generator uses all-user reads for prompt generations and generated creatives.
+Use a real `SUPABASE_SERVICE_ROLE_KEY`, or use `SUPABASE_ANON_KEY` together with the internal
+authenticated read policies below, so everyone on the team can see all reference images and JSON
+prompts.
 
-If Render is using `SUPABASE_ANON_KEY` instead of `SUPABASE_SERVICE_ROLE_KEY`, run
+If Render is using `SUPABASE_ANON_KEY` instead of a real `SUPABASE_SERVICE_ROLE_KEY`, run
 `supabase-internal-read-policies.sql` in the Supabase SQL editor. It keeps RLS enabled, but allows
 authenticated team users to read all saved JSON presets, prompt assets, sessions, and creatives.
 
