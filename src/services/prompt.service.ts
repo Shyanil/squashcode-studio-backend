@@ -202,6 +202,59 @@ function withReferenceImages(
   };
 }
 
+function referenceImageUrlFromRecord(value: unknown) {
+  const record = asJsonObject(value);
+
+  return (
+    normalizeCpanelAssetUrl(
+      asNullableString(record.url) ??
+        asNullableString(record.link) ??
+        asNullableString(record.referenceImageUrl) ??
+        asNullableString(record.reference_image_url) ??
+        undefined,
+    ) ?? undefined
+  );
+}
+
+function referenceImageUrlFromList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  for (const item of value) {
+    const url = referenceImageUrlFromRecord(item);
+
+    if (url) {
+      return url;
+    }
+  }
+
+  return undefined;
+}
+
+function generationReferenceImageUrl(
+  row: SupabaseRow,
+  generatedJson: JsonObject,
+  promptMetadata: JsonObject,
+) {
+  return (
+    normalizeCpanelAssetUrl(
+      asNullableString(row.reference_image_url) ??
+        asNullableString(promptMetadata.referenceImageUrl) ??
+        asNullableString(promptMetadata.reference_image_url) ??
+        asNullableString(generatedJson.referenceImageUrl) ??
+        asNullableString(generatedJson.reference_image_url) ??
+        undefined,
+    ) ??
+    referenceImageUrlFromRecord(promptMetadata.referenceImage) ??
+    referenceImageUrlFromRecord(generatedJson.referenceImage) ??
+    referenceImageUrlFromList(promptMetadata.referenceImages) ??
+    referenceImageUrlFromList(generatedJson.referenceImages) ??
+    referenceImageUrlFromList(generatedJson.reference_images) ??
+    undefined
+  );
+}
+
 function asMemoryItems(value: unknown): PromptMemoryItem[] {
   if (!Array.isArray(value)) {
     return [];
@@ -310,6 +363,7 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
   const promptMetadata = asJsonObject(row.prompt_metadata);
   const imageInsights = asImageAnalysis(row.image_insights);
   const creativeContext = asCreativeContext(row.creative_context_snapshot);
+  const referenceImageUrl = generationReferenceImageUrl(row, generatedJson, promptMetadata);
   const displayTitle = displayNameFromPromptContext({
     generatedJson,
     promptMetadata,
@@ -333,7 +387,7 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
     },
     imageInsights,
     referenceImagePath: asNullableString(row.reference_image_path) ?? undefined,
-    referenceImageUrl: normalizeCpanelAssetUrl(asNullableString(row.reference_image_url) ?? undefined),
+    referenceImageUrl,
     modelName: asNullableString(row.model_name) ?? undefined,
     aspectRatio: asString(row.aspect_ratio, '1:1'),
     quality: asString(row.quality, 'high'),
@@ -1386,6 +1440,7 @@ export class PromptService {
     const promptMetadata: JsonObject = {
       ...input.promptMetadata,
       displayTitle,
+      sessionTitle: input.session.title,
       ...(referenceImage ? { referenceImage } : {}),
       ...(referenceImages.length ? { referenceImages } : {}),
     };

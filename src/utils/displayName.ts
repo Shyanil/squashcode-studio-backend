@@ -10,7 +10,9 @@ const genericNames = new Set([
   'json prompt draft',
   'json prompt generator session',
   'new visual concept',
+  'previous generated prompt',
   'prompt',
+  'saved json',
   'untitled prompt',
 ]);
 
@@ -142,14 +144,21 @@ export function displayNameFromPromptContext(input: {
   const creativeContext = asRecord(input.creativeContext);
   const imageAnalysis = asRecord(input.imageAnalysis);
   const sessionTitle = asString(input.sessionTitle);
-  const existingTitle = asString(promptMetadata.displayTitle) ?? asString(generatedJson.title);
+  const metadataTitle =
+    asString(promptMetadata.sessionTitle) ??
+    asString(promptMetadata.manualTitle) ??
+    asString(promptMetadata.title);
+  const generatedTitle = asString(generatedJson.title);
+  const displayTitle = asString(promptMetadata.displayTitle);
 
   if (sessionTitle && !isWeakDisplayName(sessionTitle)) {
     return compactDisplayName(sessionTitle);
   }
 
-  if (existingTitle && !isWeakDisplayName(existingTitle)) {
-    return compactDisplayName(existingTitle);
+  for (const candidate of [metadataTitle, generatedTitle, displayTitle]) {
+    if (candidate && !isWeakDisplayName(candidate)) {
+      return compactDisplayName(candidate);
+    }
   }
 
   return (

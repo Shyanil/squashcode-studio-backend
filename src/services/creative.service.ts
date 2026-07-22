@@ -671,13 +671,6 @@ export class CreativeService {
     ).map((url) => normalizeCpanelAssetUrl(url) ?? url);
     const referenceImageUrl = referenceImageUrls[0];
 
-    if (promptGeneration && !referenceImageUrls.length) {
-      throw new HttpError(
-        400,
-        'Selected JSON does not have a saved reference image. Generate JSON from an uploaded reference image first.',
-      );
-    }
-
     const referenceImages = (
       await Promise.all(referenceImageUrls.map((url) => downloadReferenceImage(url)))
     ).filter((image): image is NonNullable<typeof image> => Boolean(image));
