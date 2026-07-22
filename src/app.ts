@@ -11,12 +11,20 @@ import { apiRouter } from '@/routes';
 export function createApp() {
   const app = express();
 
+  app.set('etag', false);
   app.use(helmet());
   app.use(cors(corsOptions));
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
   app.use(morgan('dev'));
   app.use(bindSupabaseRequestContext);
+
+  app.use('/api', (_request, response, next) => {
+    response.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    response.setHeader('Pragma', 'no-cache');
+    response.setHeader('Expires', '0');
+    next();
+  });
 
   app.get('/health', (_request, response) => {
     response.status(200).json({ status: 'ok', service: 'creative-studio-api' });
