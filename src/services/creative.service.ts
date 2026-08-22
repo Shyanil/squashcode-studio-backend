@@ -36,6 +36,7 @@ export interface CreativeModel {
   cpanelType?: CpanelAssetType;
   promptGenerationId?: string;
   referenceImageUrl?: string;
+  folderId?: string;
 }
 
 type CreativeVariant = CreativeModel['variant'];
@@ -557,6 +558,7 @@ function mapCreativeRow(
     promptGenerationId:
       asOptionalString(row.prompt_generation_id) ?? asOptionalString(metadata.promptGenerationId),
     referenceImageUrl,
+    folderId: asOptionalString(row.folder_id) ?? asOptionalString(metadata.folderId),
   };
 }
 
@@ -574,6 +576,7 @@ function isMissingCreativeMetadataColumn(error: unknown) {
       'prompt_generation_id',
       'reference_image_url',
       'metadata',
+      'folder_id',
     ].some((column) => message.includes(column))
   );
 }
@@ -640,6 +643,7 @@ export class CreativeService {
     imageCount?: number;
     promptGenerationId?: string;
     referenceImageUrl?: string;
+    folderId?: string;
   }): Promise<CreativeModel[]> {
     const userId = input.userId || localCreativeUserId;
     const brand = input.brand || 'AI Creative Studio';
@@ -648,6 +652,7 @@ export class CreativeService {
     const aspectRatio = input.aspectRatio || '1:1';
     const quality = input.quality || 'high';
     const imageCount = input.imageCount || 1;
+    const folderId = input.folderId?.trim() || undefined;
     const date = new Date().toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -765,6 +770,7 @@ export class CreativeService {
         cpanelSubfolder,
         cpanelType,
         displayTitle: title,
+        folderId,
         manualTitle: requestedCreativeName || undefined,
         promptGenerationId: promptGeneration?.id,
         referenceImageUrl,
@@ -789,6 +795,7 @@ export class CreativeService {
         cpanelType,
         promptGenerationId: promptGeneration?.id,
         referenceImageUrl,
+        folderId,
       };
 
       // Save to Supabase if connected
@@ -814,6 +821,7 @@ export class CreativeService {
           metadata,
           prompt_generation_id: promptGeneration?.id,
           reference_image_url: referenceImageUrl,
+          folder_id: folderId ?? null,
         });
 
         if (error) {

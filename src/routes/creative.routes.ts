@@ -10,4 +10,5 @@ creativeRouter.post('/:id/feedback', creativeController.createFeedback);
 creativeRouter.post('/:id/metrics', creativeController.recordMetrics);
 creativeRouter.get('/:id/learning-summary', creativeController.learningSummary);
 creativeRouter.post('/:id/favorite', creativeController.toggleFavorite);
+creativeRouter.patch('/:id/folder', creativeController.moveToFolder);
 creativeRouter.delete('/:id', creativeController.delete);

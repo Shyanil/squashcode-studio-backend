@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { creativeService } from '@/services/creative.service';
+import { creativeFoldersService } from '@/services/creativeFolders.service';
 import { normalizeCpanelAssetUrl } from '@/services/cpanelAsset.service';
 import {
   creativeFeedbackService,
@@ -133,6 +134,7 @@ export const creativeController = {
       imageCount: body.imageCount,
       promptGenerationId: body.promptGenerationId,
       referenceImageUrl: body.referenceImageUrl,
+      folderId: typeof body.folderId === 'string' ? body.folderId : undefined,
     });
     response.status(200).json({ data: result });
   }),
@@ -202,6 +204,17 @@ export const creativeController = {
     }
 
     response.status(200).json({ data: updated });
+  }),
+
+  moveToFolder: asyncHandler(async (request: Request, response: Response) => {
+    const { id } = request.params;
+    const body = requestBody(request);
+    const rawFolderId = body.folderId ?? body.folder_id;
+    const folderId = typeof rawFolderId === 'string' && rawFolderId.trim() ? rawFolderId : null;
+
+    await creativeFoldersService.assignCreative({ creativeId: id, folderId });
+
+    response.status(200).json({ data: { id, folderId } });
   }),
 
   createFeedback: asyncHandler(async (request: Request, response: Response) => {
