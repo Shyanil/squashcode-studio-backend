@@ -38,7 +38,8 @@ In Cloudflare Worker **Settings → Variables and Secrets**, set these runtime v
 
 Optional runtime variables: `OPENAI_MODEL` (defaults to `gpt-5`),
 `CPANEL_UPLOAD_DELETE_URL`, and `CPANEL_SUPPORTING_UPLOAD_URL` for the legacy cPanel integration.
-The Worker needs no build-time secret. Do not put these keys in `wrangler.jsonc` or GitHub.
+The Worker needs no build-time secret. `wrangler.jsonc` preserves text variables set in the
+dashboard across deploys. Do not put keys in `wrangler.jsonc` or GitHub.
 
 Apply the SQL files in `supabase/` to the matching Supabase project before using their features.
 Storage setup is in `supabase/creative-studio-storage.sql`; the JSON folder feature uses

@@ -4,5 +4,6 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-09-29",
   "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "observability": { "enabled": true }
 }
