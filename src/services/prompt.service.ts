@@ -6,7 +6,13 @@ import {
   isRecord,
   mergeCreativeContext,
 } from '@/openai/creativeContext.utils';
-import { cpanelAssetService, normalizeCpanelAssetUrl } from '@/services/cpanelAsset.service';
+import { CREATIVE_STUDIO_STORAGE_BUCKET, referenceObjectPath } from '@/config/creativeStudioStorage';
+import {
+  creativeStudioStorageService,
+  normalizeCreativeAssetUrl,
+  publicUrlForStoragePath,
+  supabaseStorageConfigured,
+} from '@/supabase/creativeStudioStorage.service';
 import { chatAssistantService } from '@/openai/chatAssistant.service';
 import { imageAnalysisService } from '@/openai/imageAnalysis.service';
 import { jsonGenerationService } from '@/openai/jsonGeneration.service';
@@ -68,6 +74,7 @@ interface SendMessageInput {
 interface GenerateSessionJsonInput {
   userId?: string;
   sessionId: string;
+  folderId?: string | null;
   outputOptions?: PromptOutputOptions;
 }
 
@@ -84,9 +91,7 @@ interface PromptSessionDetail {
 
 type SupabaseRow = Record<string, unknown>;
 
-const promptAssetBucket = 'prompt-generator-assets';
-const signedReferenceImageTtlSeconds = 60 * 60 * 24 * 7;
-
+const promptAssetBucket = CREATIVE_STUDIO_STORAGE_BUCKET;
 function nowIso() {
   return new Date().toISOString();
 }
@@ -156,7 +161,7 @@ function referenceImageForJson(asset?: PromptAsset): JsonObject | undefined {
   if (!asset) {
     return undefined;
   }
-  const url = normalizeCpanelAssetUrl(asset.url) ?? asset.url ?? null;
+  const url = normalizeCreativeAssetUrl(asset.url) ?? asset.url ?? null;
 
   return {
     link: url,
@@ -214,7 +219,7 @@ function referenceImageUrlFromRecord(value: unknown) {
   const record = asJsonObject(value);
 
   return (
-    normalizeCpanelAssetUrl(
+    normalizeCreativeAssetUrl(
       asNullableString(record.url) ??
         asNullableString(record.link) ??
         asNullableString(record.referenceImageUrl) ??
@@ -299,7 +304,7 @@ function generationReferenceImageUrl(
   promptMetadata: JsonObject,
 ) {
   return (
-    normalizeCpanelAssetUrl(
+    normalizeCreativeAssetUrl(
       asNullableString(row.reference_image_url) ??
         asNullableString(promptMetadata.referenceImageUrl) ??
         asNullableString(promptMetadata.reference_image_url) ??
@@ -538,7 +543,7 @@ function mapAsset(row: SupabaseRow): PromptAsset {
     width: row.width === null ? undefined : asNumber(row.width),
     height: row.height === null ? undefined : asNumber(row.height),
     url:
-      normalizeCpanelAssetUrl(
+      normalizeCreativeAssetUrl(
         asNullableString(row.reference_image_url) ??
           asNullableString(metadata.referenceImageUrl) ??
           undefined,
@@ -603,9 +608,21 @@ function mapGeneration(row: SupabaseRow): PromptGeneration {
     imageCount: asNumber(row.image_count, 1),
     status: row.status === 'queued' || row.status === 'failed' ? row.status : 'completed',
     errorMessage: asNullableString(row.error_message),
+    folderId: asNullableString(row.folder_id) ?? null,
     createdAt: asString(row.created_at, nowIso()),
     updatedAt: asString(row.updated_at, nowIso()),
   };
+}
+
+function isMissingGenerationFolderColumn(error: unknown) {
+  if (!isRecord(error)) {
+    return false;
+  }
+
+  const message = asString(error.message);
+  const code = asString(error.code);
+
+  return code === 'PGRST204' && message.includes('folder_id');
 }
 
 function sanitizeFileName(fileName: string) {
@@ -1105,6 +1122,7 @@ export class PromptService {
     return runWithSupabaseAccessToken(requestAccessToken, async () => {
       const generation = await this.saveGeneration({
         session: generationSession,
+        folderId: input.folderId,
         generatedJson: generated.generatedJson,
         promptText: generated.promptText,
         promptMetadata: {
@@ -1359,30 +1377,18 @@ export class PromptService {
     return (this.messages.get(sessionId) ?? []).filter((message) => message.userId === userId);
   }
 
-  private async createReferenceImageUrl(storagePath: string): Promise<string | undefined> {
-    if (!supabaseClient) {
-      return undefined;
-    }
-
-    const { data, error } = await supabaseClient.storage
-      .from(promptAssetBucket)
-      .createSignedUrl(storagePath, signedReferenceImageTtlSeconds);
-
-    if (error) {
-      throwSupabaseError('reference image signed URL create', error);
-    }
-
-    return data?.signedUrl;
-  }
-
   private async attachReferenceImageUrl(asset: PromptAsset): Promise<PromptAsset> {
     if (!shouldUseRemote(asset.userId) || asset.url) {
       return asset;
     }
 
+    if (!asset.storagePath) {
+      return asset;
+    }
+
     return {
       ...asset,
-      url: await this.createReferenceImageUrl(asset.storagePath),
+      url: publicUrlForStoragePath(asset.storagePath, asset.bucketName || promptAssetBucket),
     };
   }
 
@@ -1394,14 +1400,20 @@ export class PromptService {
     const requestAccessToken = getSupabaseRequestAccessToken();
     const createdAt = nowIso();
     const safeFileName = sanitizeFileName(image.fileName);
-    const storagePath = `${session.userId}/${session.id}/${Date.now()}-${safeFileName}`;
+    const isSupporting = options.assetRole === 'supporting_reference';
+    const storagePath = referenceObjectPath({
+      userId: session.userId,
+      sessionId: session.id,
+      fileName: safeFileName,
+      role: isSupporting ? 'supporting' : 'primary',
+    });
     let referenceImageUrl: string | undefined = image.dataUrl;
-    let cpanelUploadMetadata: JsonObject = {
-      cpanelFilename: safeFileName,
-      cpanelType: 'reference',
+    let storageUploadMetadata: JsonObject = {
+      storageBucket: promptAssetBucket,
+      storagePath,
     };
 
-    if (shouldUseRemote(session.userId) && supabaseClient) {
+    if (shouldUseRemote(session.userId) && supabaseStorageConfigured()) {
       const decoded = decodeDataUrl(image.dataUrl);
 
       if (!decoded) {
@@ -1409,35 +1421,21 @@ export class PromptService {
       }
 
       try {
-        const isSupporting = options.assetRole === 'supporting_reference';
-        const uploadResponse = isSupporting
-          ? await cpanelAssetService.uploadSupportingImage({
-              buffer: decoded.buffer,
-              fileName: safeFileName,
-              mimeType: image.mimeType || decoded.mimeType,
-              subfolder: session.id.slice(0, 8),
-            })
-          : await cpanelAssetService.uploadImage({
-              buffer: decoded.buffer,
-              fileName: safeFileName,
-              mimeType: image.mimeType || decoded.mimeType,
-              type: 'reference',
+        const uploadResponse = await creativeStudioStorageService.uploadImage({
+          buffer: decoded.buffer,
+          mimeType: image.mimeType || decoded.mimeType,
+          storagePath,
+          bucket: promptAssetBucket,
         });
 
-        if (uploadResponse.url) {
-          referenceImageUrl = normalizeCpanelAssetUrl(uploadResponse.url) ?? uploadResponse.url;
-        } else {
-          throw new HttpError(502, 'Failed to upload to cpanel: missing uploaded image URL');
-        }
-
-        cpanelUploadMetadata = {
-          cpanelFilename: uploadResponse.filename,
-          cpanelSubfolder: uploadResponse.subfolder,
-          cpanelType: isSupporting ? 'reference' : 'reference',
+        referenceImageUrl = uploadResponse.url;
+        storageUploadMetadata = {
+          storageBucket: uploadResponse.bucket,
+          storagePath: uploadResponse.storagePath,
         };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error';
-        throw new HttpError(502, `CPanel upload request failed: ${message}`);
+        throw new HttpError(502, `Supabase Storage upload failed: ${message}`);
       }
     }
 
@@ -1451,19 +1449,10 @@ export class PromptService {
       mimeType: image.mimeType,
       fileSize: image.size,
       url: referenceImageUrl,
-      cpanelFilename:
-        typeof cpanelUploadMetadata.cpanelFilename === 'string'
-          ? cpanelUploadMetadata.cpanelFilename
-          : undefined,
-      cpanelSubfolder:
-        typeof cpanelUploadMetadata.cpanelSubfolder === 'string'
-          ? cpanelUploadMetadata.cpanelSubfolder
-          : undefined,
-      cpanelType: 'reference',
       metadata: {
         source: options.source ?? 'prompt_generator_upload',
         assetRole: options.assetRole ?? 'primary_reference',
-        ...cpanelUploadMetadata,
+        ...storageUploadMetadata,
         referenceImageUrl,
       },
       createdAt,
@@ -1485,16 +1474,7 @@ export class PromptService {
         metadata: asset.metadata,
       };
       return runWithSupabaseAccessToken(requestAccessToken, async () => {
-        const { data, error } = await client
-          .from('prompt_assets')
-          .insert({
-            ...legacyRow,
-            cpanel_type: 'reference',
-            cpanel_subfolder: asset.cpanelSubfolder,
-            cpanel_filename: asset.cpanelFilename,
-          })
-          .select()
-          .single();
+        const { data, error } = await client.from('prompt_assets').insert(legacyRow).select().single();
 
         if (error) {
           if (isMissingPromptAssetCpanelColumn(error)) {
@@ -1560,15 +1540,23 @@ export class PromptService {
     return (this.assets.get(sessionId) ?? []).filter((asset) => asset.userId === userId);
   }
 
-  public async listAllGenerations(input: { userId?: string }): Promise<PromptGeneration[]> {
+  public async listAllGenerations(input: {
+    userId?: string;
+    folderId?: string | null;
+  }): Promise<PromptGeneration[]> {
     const userId = resolveUserId(input.userId);
     const readClient = supabaseAdminClient ?? supabaseClient;
 
     if (shouldUseRemote(userId) && readClient) {
-      const { data, error } = await readClient
-        .from('prompt_generations')
-        .select('*')
-        .order('created_at', { ascending: false });
+      let query = readClient.from('prompt_generations').select('*');
+
+      if (input.folderId === 'unsorted') {
+        query = query.is('folder_id', null);
+      } else if (typeof input.folderId === 'string' && input.folderId.trim()) {
+        query = query.eq('folder_id', input.folderId.trim());
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         throwSupabaseError('prompt generation list', error);
@@ -1648,6 +1636,7 @@ export class PromptService {
 
   private async saveGeneration(input: {
     session: PromptSession;
+    folderId?: string | null;
     generatedJson: JsonObject;
     promptText: string;
     promptMetadata: JsonObject;
@@ -1698,34 +1687,54 @@ export class PromptService {
       imageCount: input.imageCount,
       status: 'completed',
       errorMessage: null,
+      folderId:
+        typeof input.folderId === 'string' && input.folderId.trim() ? input.folderId.trim() : null,
       createdAt,
       updatedAt: createdAt,
     };
 
     if (shouldUseRemote(input.session.userId) && supabaseClient) {
+      const folderId =
+        typeof input.folderId === 'string' && input.folderId.trim() ? input.folderId.trim() : null;
+      const baseRow = {
+        id: generation.id,
+        session_id: input.session.id,
+        user_id: input.session.userId,
+        version_number: generation.versionNumber,
+        prompt_text: generation.promptText,
+        generated_json: generation.generatedJson,
+        prompt_metadata: generation.promptMetadata,
+        image_insights: generation.imageInsights,
+        reference_image_path: generation.referenceImagePath,
+        reference_image_url: generation.referenceImageUrl,
+        model_name: generation.modelName,
+        aspect_ratio: generation.aspectRatio,
+        quality: generation.quality,
+        image_count: generation.imageCount,
+        status: generation.status,
+        creative_context_snapshot: input.session.creativeContext,
+        conversation_snapshot: promptMetadata.conversationSnapshot ?? [],
+      };
+      const insertRow: Record<string, unknown> = folderId
+        ? { ...baseRow, folder_id: folderId }
+        : baseRow;
       const { data, error } = await supabaseClient
         .from('prompt_generations')
-        .insert({
-          id: generation.id,
-          session_id: input.session.id,
-          user_id: input.session.userId,
-          version_number: generation.versionNumber,
-          prompt_text: generation.promptText,
-          generated_json: generation.generatedJson,
-          prompt_metadata: generation.promptMetadata,
-          image_insights: generation.imageInsights,
-          reference_image_path: generation.referenceImagePath,
-          reference_image_url: generation.referenceImageUrl,
-          model_name: generation.modelName,
-          aspect_ratio: generation.aspectRatio,
-          quality: generation.quality,
-          image_count: generation.imageCount,
-          status: generation.status,
-          creative_context_snapshot: input.session.creativeContext,
-          conversation_snapshot: promptMetadata.conversationSnapshot ?? [],
-        })
+        .insert(insertRow)
         .select()
         .single();
+
+      if (error && folderId && isMissingGenerationFolderColumn(error)) {
+        const legacy = await supabaseClient.from('prompt_generations').insert(baseRow).select().single();
+
+        if (legacy.error) {
+          throwSupabaseError('prompt generation create', legacy.error);
+        }
+
+        if (legacy.data) {
+          return mapGeneration(legacy.data as SupabaseRow);
+        }
+      }
 
       if (error) {
         throwSupabaseError('prompt generation create', error);

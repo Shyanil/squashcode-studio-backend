@@ -5,11 +5,11 @@ import type {
   JsonObject,
   PromptOutputOptions,
   PromptSourceType,
-  PromptUploadedImage,
 } from '@/models/prompt.model';
 import { promptService } from '@/services/prompt.service';
 import { asyncHandler } from '@/utils/asyncHandler';
 import { HttpError } from '@/utils/httpError';
+import { resolvePromptUploadedImage } from '@/utils/promptImageInput';
 
 function requestUserId(request: Request) {
   const authUserId = (request as AuthenticatedRequest).auth?.sub;
@@ -51,28 +51,6 @@ function asOutputOptions(value: unknown): PromptOutputOptions | undefined {
   };
 }
 
-function asUploadedImage(value: unknown): PromptUploadedImage {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new HttpError(400, 'image is required.');
-  }
-
-  const record = value as Record<string, unknown>;
-  const dataUrl = asString(record.dataUrl);
-  const fileName = asString(record.fileName);
-  const mimeType = asString(record.mimeType);
-
-  if (!dataUrl || !fileName || !mimeType) {
-    throw new HttpError(400, 'image.dataUrl, image.fileName, and image.mimeType are required.');
-  }
-
-  return {
-    dataUrl,
-    fileName,
-    mimeType,
-    size: typeof record.size === 'number' ? record.size : undefined,
-  };
-}
-
 function requireSessionId(request: Request) {
   const sessionId = request.params.sessionId;
 
@@ -93,8 +71,17 @@ export const promptController = {
   }),
 
   listGenerations: asyncHandler(async (request: Request, response: Response) => {
+    const rawFolderId = request.query.folderId ?? request.query.folder_id;
+    const folderId =
+      rawFolderId === 'unsorted'
+        ? 'unsorted'
+        : typeof rawFolderId === 'string' && rawFolderId.trim()
+          ? rawFolderId.trim()
+          : undefined;
+
     const generations = await promptService.listAllGenerations({
       userId: requestUserId(request),
+      folderId,
     });
 
     response.status(200).json({ data: generations });
@@ -152,7 +139,7 @@ export const promptController = {
     const result = await promptService.analyzeSessionImage({
       userId: requestUserId(request),
       sessionId: requireSessionId(request),
-      image: asUploadedImage(body.image),
+      image: await resolvePromptUploadedImage(body.image),
       promptText: asString(body.promptText),
     });
 
@@ -168,7 +155,7 @@ export const promptController = {
     const result = await promptService.addSessionAsset({
       userId: requestUserId(request),
       sessionId: requireSessionId(request),
-      image: asUploadedImage(body.image),
+      image: await resolvePromptUploadedImage(body.image),
       assetRole: asString(body.assetRole),
     });
 
@@ -202,9 +189,18 @@ export const promptController = {
 
   generateSessionJson: asyncHandler(async (request: Request, response: Response) => {
     const body = jsonBody(request);
+    const rawFolderId = body.folderId ?? body.folder_id;
+    const folderId =
+      rawFolderId === null || rawFolderId === ''
+        ? null
+        : typeof rawFolderId === 'string' && rawFolderId.trim()
+          ? rawFolderId.trim()
+          : undefined;
+
     const result = await promptService.generateSessionJson({
       userId: requestUserId(request),
       sessionId: requireSessionId(request),
+      folderId,
       outputOptions: asOutputOptions(body.outputOptions),
     });
 
@@ -227,7 +223,7 @@ export const promptController = {
       : await promptService.generateOneOffJson({
           userId: requestUserId(request),
           promptText: asString(body.promptText),
-          image: body.image ? asUploadedImage(body.image) : undefined,
+          image: body.image ? await resolvePromptUploadedImage(body.image) : undefined,
           outputOptions: asOutputOptions(body.outputOptions),
         });
 

@@ -1,10 +1,15 @@
-import { notImplemented } from '@/utils/httpError';
+import { creativeStudioStorageService } from '@/supabase/creativeStudioStorage.service';
 
 export class SupabaseImageUploadService {
-  uploadImage() {
-    return notImplemented('Supabase image upload');
+  uploadImage(input: {
+    buffer: Buffer;
+    storagePath: string;
+    mimeType: string;
+    bucket?: string;
+    upsert?: boolean;
+  }) {
+    return creativeStudioStorageService.uploadImage(input);
   }
 }
 
 export const supabaseImageUploadService = new SupabaseImageUploadService();
-

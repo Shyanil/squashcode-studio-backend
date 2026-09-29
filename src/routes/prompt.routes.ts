@@ -1,9 +1,11 @@
 import { Router } from 'express';
 
 import { promptController } from '@/controllers/prompt.controller';
+import { promptJsonFoldersRouter } from '@/routes/promptJsonFolders.routes';
 
 export const promptRouter = Router();
 
+promptRouter.use('/folders', promptJsonFoldersRouter);
 promptRouter.get('/sessions', promptController.listSessions);
 promptRouter.get('/generations', promptController.listGenerations);
 promptRouter.post('/sessions', promptController.createSession);

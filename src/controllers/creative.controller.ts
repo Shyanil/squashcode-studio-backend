@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { creativeService } from '@/services/creative.service';
 import { creativeFoldersService } from '@/services/creativeFolders.service';
-import { normalizeCpanelAssetUrl } from '@/services/cpanelAsset.service';
+import { normalizeCreativeAssetUrl } from '@/supabase/creativeStudioStorage.service';
 import {
   creativeFeedbackService,
   type CreativeFeedbackSignalType,
@@ -197,7 +197,7 @@ export const creativeController = {
             aspectRatio: updatedData.aspect_ratio,
             variant: updatedData.variant,
             favorite: updatedData.favorite,
-            imageUrl: normalizeCpanelAssetUrl(updatedData.image_url) ?? updatedData.image_url,
+            imageUrl: normalizeCreativeAssetUrl(updatedData.image_url) ?? updatedData.image_url,
           };
         }
       }

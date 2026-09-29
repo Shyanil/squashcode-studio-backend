@@ -1,0 +1,45 @@
+{
+  "bucket": "creative-studio-assets",
+  "description": "Organized object paths for SquashCode Creative Studio image assets. Paths are relative to the bucket root.",
+  "folders": {
+    "generations": {
+      "purpose": "AI-generated creative output images from the Creative Generator",
+      "pathPattern": "generations/{userId}/{folderId}/{creativeId}/{fileName}",
+      "pathVariables": {
+        "userId": "Supabase auth user UUID",
+        "folderId": "Creative folder UUID or literal uncategorized",
+        "creativeId": "Creative row UUID",
+        "fileName": "Sanitized PNG file name"
+      }
+    },
+    "references": {
+      "app": "prompt-generator",
+      "primary": {
+        "purpose": "Primary reference images uploaded in the Prompt Generator (/prompt-generator)",
+        "storageUiFolder": "references/primary",
+        "pathPattern": "references/primary/{userId}/{sessionId}/{timestamp}-{fileName}"
+      },
+      "supporting": {
+        "purpose": "Supporting reference images for prompt sessions",
+        "storageUiFolder": "references/supporting",
+        "pathPattern": "references/supporting/{userId}/{sessionId}/{timestamp}-{fileName}"
+      }
+    },
+    "uploads": {
+      "manual": {
+        "purpose": "Direct manual uploads (future use)",
+        "pathPattern": "uploads/manual/{userId}/{timestamp}-{fileName}"
+      }
+    },
+    "previews": {
+      "thumbnails": {
+        "purpose": "Derived preview or thumbnail images (future use)",
+        "pathPattern": "previews/thumbnails/{userId}/{creativeId}/{fileName}"
+      }
+    }
+  },
+  "publicAccess": {
+    "read": "Public read via storage public URL (bucket is public)",
+    "write": "Backend service role uploads; authenticated users may upload under their own userId prefix when using the client directly"
+  }
+}

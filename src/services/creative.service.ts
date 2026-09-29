@@ -1,13 +1,16 @@
 import { randomUUID } from 'crypto';
 import { deflateSync } from 'zlib';
 import axios from 'axios';
+import { generationObjectPath } from '@/config/creativeStudioStorage';
 import { env } from '@/config/env';
+import { cpanelAssetService, type CpanelAssetType } from '@/services/cpanelAsset.service';
 import { supabaseAdminClient, supabaseClient } from '@/supabase/client';
 import {
-  cpanelAssetService,
-  normalizeCpanelAssetUrl,
-  type CpanelAssetType,
-} from '@/services/cpanelAsset.service';
+  creativeStudioStorageService,
+  normalizeCreativeAssetUrl,
+  parseStorageLocationFromUrl,
+  supabaseStorageConfigured,
+} from '@/supabase/creativeStudioStorage.service';
 import { promptService } from '@/services/prompt.service';
 import type { JsonObject, PromptGeneration } from '@/models/prompt.model';
 import { HttpError } from '@/utils/httpError';
@@ -34,6 +37,8 @@ export interface CreativeModel {
   cpanelFilename?: string;
   cpanelSubfolder?: string;
   cpanelType?: CpanelAssetType;
+  storageBucket?: string;
+  storagePath?: string;
   promptGenerationId?: string;
   referenceImageUrl?: string;
   folderId?: string;
@@ -533,7 +538,7 @@ function mapCreativeRow(
 ): CreativeModel {
   const metadata = asRecord(row.metadata);
   const referenceImageUrl =
-    normalizeCpanelAssetUrl(
+    normalizeCreativeAssetUrl(
       asOptionalString(row.reference_image_url) ?? asOptionalString(metadata.referenceImageUrl),
     ) ?? undefined;
 
@@ -548,13 +553,15 @@ function mapCreativeRow(
     aspectRatio: asString(row.aspect_ratio, '1:1'),
     variant: asString(row.variant, 'mint'),
     favorite: row.favorite === true,
-    imageUrl: normalizeCpanelAssetUrl(asString(row.image_url)) ?? '',
+    imageUrl: normalizeCreativeAssetUrl(asString(row.image_url)) ?? '',
     createdAt: asString(row.created_at),
     cpanelFilename:
       asOptionalString(row.cpanel_filename) ?? asOptionalString(metadata.cpanelFilename),
     cpanelSubfolder:
       asOptionalString(row.cpanel_subfolder) ?? asOptionalString(metadata.cpanelSubfolder),
     cpanelType: asCpanelAssetType(row.cpanel_type) ?? asCpanelAssetType(metadata.cpanelType),
+    storageBucket: asOptionalString(metadata.storageBucket),
+    storagePath: asOptionalString(metadata.storagePath),
     promptGenerationId:
       asOptionalString(row.prompt_generation_id) ?? asOptionalString(metadata.promptGenerationId),
     referenceImageUrl,
@@ -676,7 +683,7 @@ export class CreativeService {
         : promptGeneration
           ? referenceImageUrlsFromGeneration(promptGeneration)
           : []
-    ).map((url) => normalizeCpanelAssetUrl(url) ?? url);
+    ).map((url) => normalizeCreativeAssetUrl(url) ?? url);
     const referenceImageUrl = referenceImageUrls[0];
 
     const referenceImages = (
@@ -741,34 +748,38 @@ export class CreativeService {
       const fileSlug = slugify(displayTitle).slice(0, 30) || 'concept';
       const fileName = `${fileSlug}_${id.slice(0, 8)}_option_${index + 1}.png`;
       let imageUrl = '';
-      let cpanelFilename: string | undefined;
-      let cpanelSubfolder: string | undefined;
-      const cpanelType: CpanelAssetType = 'generation';
+      let storageBucket: string | undefined;
+      let storagePath: string | undefined;
 
-      try {
-        const uploadResponse = await cpanelAssetService.uploadImage({
-          buffer: imageBuffer,
-          fileName,
-          mimeType: 'image/png',
-          type: cpanelType,
-        });
-
-        if (uploadResponse.url) {
+      if (supabaseStorageConfigured()) {
+        try {
+          storagePath = generationObjectPath({
+            userId,
+            folderId,
+            creativeId: id,
+            fileName,
+          });
+          const uploadResponse = await creativeStudioStorageService.uploadImage({
+            buffer: imageBuffer,
+            mimeType: 'image/png',
+            storagePath,
+          });
           imageUrl = uploadResponse.url;
-          cpanelFilename = uploadResponse.filename;
-          cpanelSubfolder = uploadResponse.subfolder;
-        } else {
+          storageBucket = uploadResponse.bucket;
+          storagePath = uploadResponse.storagePath;
+        } catch (err) {
+          console.error('Failed to upload to Supabase Storage:', err);
           imageUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+          storageBucket = undefined;
+          storagePath = undefined;
         }
-      } catch (err) {
-        console.error('Failed to upload to cpanel:', err);
+      } else {
         imageUrl = `data:image/png;base64,${imageBuffer.toString('base64')}`;
       }
 
       const metadata: JsonObject = {
-        cpanelFilename,
-        cpanelSubfolder,
-        cpanelType,
+        storageBucket,
+        storagePath,
         displayTitle: title,
         folderId,
         manualTitle: requestedCreativeName || undefined,
@@ -790,9 +801,8 @@ export class CreativeService {
         favorite: false,
         imageUrl,
         createdAt,
-        cpanelFilename,
-        cpanelSubfolder,
-        cpanelType,
+        storageBucket,
+        storagePath,
         promptGenerationId: promptGeneration?.id,
         referenceImageUrl,
         folderId,
@@ -815,9 +825,6 @@ export class CreativeService {
         };
         const { error } = await supabaseClient.from('creatives').insert({
           ...legacyRow,
-          cpanel_filename: cpanelFilename,
-          cpanel_subfolder: cpanelSubfolder,
-          cpanel_type: cpanelType,
           metadata,
           prompt_generation_id: promptGeneration?.id,
           reference_image_url: referenceImageUrl,
@@ -936,13 +943,34 @@ export class CreativeService {
     }
 
     if (creative) {
-      const cpanelTarget = cpanelTargetForCreative(creative);
+      const storagePath =
+        creative.storagePath ??
+        parseStorageLocationFromUrl(creative.imageUrl)?.storagePath;
+      const storageBucket =
+        creative.storageBucket ?? parseStorageLocationFromUrl(creative.imageUrl)?.bucket;
 
-      if (cpanelTarget?.subfolder) {
-        await cpanelAssetService.deleteFolder({
-          subfolder: cpanelTarget.subfolder,
-          type: cpanelTarget.type,
-        });
+      if (storagePath && supabaseStorageConfigured()) {
+        try {
+          await creativeStudioStorageService.deleteObject({
+            storagePath,
+            bucket: storageBucket,
+          });
+        } catch (err) {
+          console.error('Failed to delete creative from Supabase Storage:', err);
+        }
+      } else {
+        const cpanelTarget = cpanelTargetForCreative(creative);
+
+        if (cpanelTarget?.subfolder) {
+          try {
+            await cpanelAssetService.deleteFolder({
+              subfolder: cpanelTarget.subfolder,
+              type: cpanelTarget.type,
+            });
+          } catch (err) {
+            console.error('Failed to delete legacy cPanel asset:', err);
+          }
+        }
       }
     }
 

@@ -6,6 +6,7 @@ const configuredOrigins = (process.env.CORS_ORIGIN ?? '')
   .filter(Boolean);
 
 const defaultAllowedOrigins = [
+  'https://squashcode-studio-frontend.shyanilsquashcode.workers.dev',
   'https://squashcode-studio.netlify.app',
   'http://localhost:5173',
   'http://localhost:5174',

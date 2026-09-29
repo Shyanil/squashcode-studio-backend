@@ -8,7 +8,7 @@ import { errorHandler, notFoundHandler } from '@/middleware/error.middleware';
 import { bindSupabaseRequestContext } from '@/middleware/supabaseRequestContext.middleware';
 import { apiRouter } from '@/routes';
 
-export function createApp() {
+export function createApp({ requestLogging = true }: { requestLogging?: boolean } = {}) {
   const app = express();
 
   app.set('etag', false);
@@ -16,7 +16,9 @@ export function createApp() {
   app.use(cors(corsOptions));
   app.use(express.json({ limit: '25mb' }));
   app.use(express.urlencoded({ extended: true, limit: '25mb' }));
-  app.use(morgan('dev'));
+  if (requestLogging) {
+    app.use(morgan('dev'));
+  }
   app.use(bindSupabaseRequestContext);
 
   app.use('/api', (_request, response, next) => {

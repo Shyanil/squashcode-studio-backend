@@ -137,6 +137,7 @@ export interface PromptGeneration {
   imageCount: number;
   status: 'queued' | 'completed' | 'failed';
   errorMessage?: string | null;
+  folderId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
