@@ -28,18 +28,17 @@ This repository includes `wrangler.jsonc` and `worker.ts`. Cloudflare Workers Bu
 The Worker serves the Express API at `/api` and responds to `/health`. `npm run start` still runs
 the Node server locally or on Render.
 
-In Cloudflare Worker **Settings → Variables and Secrets**, set these runtime values:
+The public runtime values `SUPABASE_URL` and `CORS_ORIGIN` are set in `wrangler.jsonc`.
+In Cloudflare Worker **Settings → Variables and Secrets**, set these runtime secrets:
 
-- `SUPABASE_URL`: text variable for the Supabase project URL.
 - `SUPABASE_ANON_KEY`: secret for requests scoped by a signed-in user.
 - `SUPABASE_SERVICE_ROLE_KEY`: secret containing the actual service role key for server-side uploads and shared reads.
 - `OPENAI_API_KEY`: secret for AI generation.
-- `CORS_ORIGIN`: text variable set to `https://squashcode-studio-frontend.shyanilsquashcode.workers.dev` (also allowed by the code default).
 
 Optional runtime variables: `OPENAI_MODEL` (defaults to `gpt-5`),
 `CPANEL_UPLOAD_DELETE_URL`, and `CPANEL_SUPPORTING_UPLOAD_URL` for the legacy cPanel integration.
-The Worker needs no build-time secret. `wrangler.jsonc` preserves text variables set in the
-dashboard across deploys. Do not put keys in `wrangler.jsonc` or GitHub.
+The Worker needs no build-time secret. `wrangler.jsonc` preserves any additional text variables
+set in the dashboard across deploys. Do not put secret keys in `wrangler.jsonc` or GitHub.
 
 Apply the SQL files in `supabase/` to the matching Supabase project before using their features.
 Storage setup is in `supabase/creative-studio-storage.sql`; the JSON folder feature uses

@@ -5,5 +5,9 @@
   "compatibility_date": "2026-09-29",
   "compatibility_flags": ["nodejs_compat"],
   "keep_vars": true,
+  "vars": {
+    "CORS_ORIGIN": "https://squashcode-studio-frontend.shyanilsquashcode.workers.dev",
+    "SUPABASE_URL": "https://rrgrjbgnrumkfrvmpsxv.supabase.co"
+  },
   "observability": { "enabled": true }
 }
